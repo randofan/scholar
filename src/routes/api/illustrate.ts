@@ -1,6 +1,8 @@
 import "@tanstack/react-start";
 import { createFileRoute } from "@tanstack/react-router";
 import { generateVisual } from "@/lib/scholar/illustrate.server";
+import { loadSkillRulesCached } from "@/lib/scholar/skills.server";
+import { getCfBindings } from "@/lib/cf-bindings";
 
 const corsHeaders = { "Content-Type": "application/json" };
 
@@ -46,6 +48,10 @@ export const Route = createFileRoute("/api/illustrate")({
           .slice(0, 8)
           .map((l) => l.slice(0, 200));
 
+        // Persistent rules distilled from past sessions (empty if the R2
+        // bucket isn't configured — the generator works fine without them).
+        const skillRules = await loadSkillRulesCached(getCfBindings().SKILLS);
+
         try {
           const result = await generateVisual({
             topic,
@@ -54,6 +60,7 @@ export const Route = createFileRoute("/api/illustrate")({
             recentVisuals,
             renderFailure,
             lessons,
+            skillRules,
           });
           if (result.warnings.length > 0) {
             console.warn("illustrate retries", result.warnings);

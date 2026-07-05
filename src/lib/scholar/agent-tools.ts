@@ -214,6 +214,34 @@ function collectRecentVisuals(excludeId: string) {
     .map((c) => ({ title: c.title, kind: c.payload!.kind }));
 }
 
+/**
+ * Distill this session's not-yet-distilled failure lessons into the
+ * persistent R2 skill file (via Workers AI on the server). Called when a
+ * voice session ends. Fire-and-forget and idempotent: the distilled count
+ * guard means calling it from both stop() and onDisconnect is safe, and a
+ * missing R2 bucket just no-ops server-side.
+ */
+export async function distillSessionLessons(fetchImpl: typeof fetch = fetch) {
+  const store = useScholarStore.getState;
+  const { lessons, distilledLessonCount } = store();
+  if (lessons.length <= distilledLessonCount) return;
+
+  try {
+    await postJsonWithRetry(
+      "/api/skills",
+      { lessons },
+      "Skills service",
+      fetchImpl,
+      { attempts: 1 },
+    );
+    store().markLessonsDistilled(lessons.length);
+  } catch (err) {
+    // Non-fatal: lessons stay in the session store and the next session end
+    // (or reload within the tab session) retries the distill.
+    console.warn("skill distillation failed", err instanceof Error ? err.message : err);
+  }
+}
+
 // One client-initiated regeneration per slide. The regeneration itself gets
 // the server-side retry loop too, so a single render failure buys up to
 // (1 + maxAttempts) model calls total — enough to fix a syntax slip without

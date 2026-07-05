@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import { useServerFn } from "@tanstack/react-start";
 import { useScholarStore } from "@/lib/scholar/store";
-import { buildClientTools } from "@/lib/scholar/agent-tools";
+import { buildClientTools, distillSessionLessons } from "@/lib/scholar/agent-tools";
 import { buildScholarContextUpdate, buildScholarVoiceSessionOptions } from "@/lib/scholar/voice-session";
 import { startScholarVoiceSession } from "@/lib/elevenlabs.functions";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,9 @@ function VoicePanelContent() {
     },
     onDisconnect: (details) => {
       setStartRequested(false);
+      // Session over — fold this session's failure lessons into the
+      // persistent skill file (idempotent, fire-and-forget).
+      void distillSessionLessons();
       if (details?.reason === "error") {
         console.error("convo disconnected", details);
         toast.error(details.message || "Voice agent disconnected");
@@ -159,6 +162,7 @@ function VoicePanelContent() {
 
   const stop = async () => {
     await conversation.endSession();
+    void distillSessionLessons();
   };
 
   useEffect(() => {

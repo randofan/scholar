@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SessionRouteImport } from './routes/session'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiSkillsRouteImport } from './routes/api/skills'
 import { Route as ApiResearchRouteImport } from './routes/api/research'
 import { Route as ApiIllustrateRouteImport } from './routes/api/illustrate'
 
@@ -22,6 +23,11 @@ const SessionRoute = SessionRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSkillsRoute = ApiSkillsRouteImport.update({
+  id: '/api/skills',
+  path: '/api/skills',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiResearchRoute = ApiResearchRouteImport.update({
@@ -40,12 +46,14 @@ export interface FileRoutesByFullPath {
   '/session': typeof SessionRoute
   '/api/illustrate': typeof ApiIllustrateRoute
   '/api/research': typeof ApiResearchRoute
+  '/api/skills': typeof ApiSkillsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/session': typeof SessionRoute
   '/api/illustrate': typeof ApiIllustrateRoute
   '/api/research': typeof ApiResearchRoute
+  '/api/skills': typeof ApiSkillsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,21 @@ export interface FileRoutesById {
   '/session': typeof SessionRoute
   '/api/illustrate': typeof ApiIllustrateRoute
   '/api/research': typeof ApiResearchRoute
+  '/api/skills': typeof ApiSkillsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/session' | '/api/illustrate' | '/api/research'
+  fullPaths:
+    '/' | '/session' | '/api/illustrate' | '/api/research' | '/api/skills'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/session' | '/api/illustrate' | '/api/research'
-  id: '__root__' | '/' | '/session' | '/api/illustrate' | '/api/research'
+  to: '/' | '/session' | '/api/illustrate' | '/api/research' | '/api/skills'
+  id:
+    | '__root__'
+    | '/'
+    | '/session'
+    | '/api/illustrate'
+    | '/api/research'
+    | '/api/skills'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +83,7 @@ export interface RootRouteChildren {
   SessionRoute: typeof SessionRoute
   ApiIllustrateRoute: typeof ApiIllustrateRoute
   ApiResearchRoute: typeof ApiResearchRoute
+  ApiSkillsRoute: typeof ApiSkillsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -83,6 +100,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/skills': {
+      id: '/api/skills'
+      path: '/api/skills'
+      fullPath: '/api/skills'
+      preLoaderRoute: typeof ApiSkillsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/research': {
@@ -107,6 +131,7 @@ const rootRouteChildren: RootRouteChildren = {
   SessionRoute: SessionRoute,
   ApiIllustrateRoute: ApiIllustrateRoute,
   ApiResearchRoute: ApiResearchRoute,
+  ApiSkillsRoute: ApiSkillsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

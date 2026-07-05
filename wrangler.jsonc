@@ -4,4 +4,9 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  // R2 bucket holding generator skill files (create with:
+  //   wrangler r2 bucket create scholar-skills)
+  "r2_buckets": [{ "binding": "SKILLS", "bucket_name": "scholar-skills" }],
+  // Workers AI — used to distill session lessons into skill updates.
+  "ai": { "binding": "AI" },
 }

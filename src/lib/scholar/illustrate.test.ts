@@ -428,6 +428,29 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
     expect(prompt).toMatch(/Parse error on line 2/);
   });
 
+  it("injects persistent skill rules into the prompt as learned rules", async () => {
+    const { fetchImpl, captured } = groqFetchMock([
+      {
+        title: "Routing map",
+        narration: "The mindmap groups routing strategies by locality and cost.",
+        mermaid: "mindmap\n  root((Routing))\n    Local\n      ECMP\n    Global\n      Spray",
+      },
+    ]);
+
+    await generateVisual(
+      {
+        topic: "Routing strategies",
+        hint: "diagram",
+        skillRules: ["Balance every mermaid bracket pair before emitting"],
+      },
+      { env: { groqApiKey: "groq-token" }, maxAttempts: 1, fetchImpl },
+    );
+
+    const prompt = userPromptOf(captured[0]);
+    expect(prompt).toMatch(/LEARNED RULES/);
+    expect(prompt).toMatch(/Balance every mermaid bracket pair/);
+  });
+
   it("injects session lessons into the prompt as known failure modes", async () => {
     const { fetchImpl, captured } = groqFetchMock([
       {

@@ -373,6 +373,12 @@ export interface IllustrateInput {
    * session.
    */
   lessons?: string[];
+  /**
+   * Persistent rules distilled from past sessions' failures (loaded from the
+   * R2 skill file by the API route). Injected as "LEARNED RULES" so fixes for
+   * common failure modes survive across sessions and users.
+   */
+  skillRules?: string[];
 }
 
 export interface IllustrateResult {
@@ -818,6 +824,11 @@ export async function generateVisual(
     ? `\nKNOWN FAILURE MODES from earlier in this session — do NOT repeat these mistakes:\n${lessons.map((l) => `- ${l.slice(0, 200)}`).join("\n")}\n`
     : "";
 
+  const skillRules = (input.skillRules ?? []).slice(0, 25);
+  const skillBlock = skillRules.length
+    ? `\nLEARNED RULES (distilled from failures in past sessions — follow ALL of these):\n${skillRules.map((r) => `- ${r.slice(0, 200)}`).join("\n")}\n`
+    : "";
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const temperature =
       GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)];
@@ -829,7 +840,7 @@ export async function generateVisual(
         apiKey: groqApiKey,
         kind,
         fetchImpl: opts.fetchImpl,
-        recentBlock: `${recentBlock}${lessonsBlock}`,
+        recentBlock: `${recentBlock}${skillBlock}${lessonsBlock}`,
         correction,
         temperature,
       });

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildClientTools,
   deliverContextualUpdate,
+  distillSessionLessons,
   fetchIllustration,
   fetchResearchBriefing,
   parseResearchResponse,
@@ -23,6 +24,7 @@ beforeEach(() => {
     researchItems: [],
     transcript: [],
     lessons: [],
+    distilledLessonCount: 0,
   });
 });
 
@@ -186,6 +188,41 @@ describe("regenerateAfterRenderFailure", () => {
     const item = useScholarStore.getState().canvasItems[0];
     expect(item.status).toBe("error");
     expect(item.error).toMatch(/failed to render/i);
+  });
+});
+
+describe("distillSessionLessons", () => {
+  it("POSTs undistilled lessons to /api/skills and marks them distilled", async () => {
+    useScholarStore.setState({
+      lessons: ["mindmap bodies must never contain arrows", "label chart axes with units"],
+      distilledLessonCount: 0,
+    });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ok: true, rules: ["merged rule"] }));
+
+    await distillSessionLessons(fetchImpl);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("/api/skills");
+    expect(JSON.parse(String(init?.body)).lessons).toHaveLength(2);
+    expect(useScholarStore.getState().distilledLessonCount).toBe(2);
+
+    // Idempotent: nothing new to distill → no second request.
+    await distillSessionLessons(fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps lessons undistilled when the request fails, so a later call retries", async () => {
+    useScholarStore.setState({ lessons: ["a lesson"], distilledLessonCount: 0 });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ok: false, error: "R2 skills bucket not configured" }, { status: 503 }));
+
+    await distillSessionLessons(fetchImpl);
+
+    expect(useScholarStore.getState().distilledLessonCount).toBe(0);
   });
 });
 

@@ -106,6 +106,9 @@ interface ScholarState {
    */
   lessons: string[];
   addLesson: (lesson: string) => void;
+  /** How many of `lessons` have already been distilled into the persistent skill file. */
+  distilledLessonCount: number;
+  markLessonsDistilled: (count: number) => void;
 
   reset: () => void;
 }
@@ -175,16 +178,29 @@ export const useScholarStore = create<ScholarState>()(
           if (!normalized || s.lessons.includes(normalized)) return {};
           return { lessons: [...s.lessons, normalized].slice(-MAX_LESSONS) };
         }),
+      distilledLessonCount: 0,
+      markLessonsDistilled: (count) => set({ distilledLessonCount: count }),
 
       reset: () =>
-        set({ pdf: null, canvasItems: [], researchItems: [], transcript: [], lessons: [] }),
+        set({
+          pdf: null,
+          canvasItems: [],
+          researchItems: [],
+          transcript: [],
+          lessons: [],
+          distilledLessonCount: 0,
+        }),
     }),
     {
       name: "scholar-store",
       storage: createJSONStorage(() =>
         typeof window !== "undefined" ? window.sessionStorage : createMemoryStorage(),
       ),
-      partialize: (s) => ({ pdf: s.pdf, lessons: s.lessons }),
+      partialize: (s) => ({
+        pdf: s.pdf,
+        lessons: s.lessons,
+        distilledLessonCount: s.distilledLessonCount,
+      }),
     },
   ),
 );
