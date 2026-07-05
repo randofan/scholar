@@ -46,6 +46,7 @@ function SlideCard({
 
 export function CanvasPane() {
   const items = useScholarStore((s) => s.canvasItems);
+  const patchCanvas = useScholarStore((s) => s.patchCanvas);
 
   if (items.length === 0) {
     return (
@@ -82,7 +83,12 @@ export function CanvasPane() {
                 <MathView steps={item.payload.spec.steps} inline={item.payload.spec.inline} />
               )}
               {item.payload.kind === "diagram" && (
-                <MermaidView source={item.payload.spec.mermaid} />
+                <MermaidView
+                  source={item.payload.spec.mermaid}
+                  onRenderError={(message) =>
+                    patchCanvas(item.id, { status: "error", error: `Diagram failed to render: ${message}` })
+                  }
+                />
               )}
               {item.payload.kind === "table" && <TableView spec={item.payload.spec} />}
               {item.payload.kind === "callout" && (

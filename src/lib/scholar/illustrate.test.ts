@@ -5,6 +5,7 @@ import {
   generateVisual,
   isPromptLikeVisualText,
   normalizeLoose,
+  validateAxisLabel,
   validateMermaid,
   validateVisual,
   type Visual,
@@ -34,6 +35,67 @@ describe("validateMermaid", () => {
   it("rejects too few lines", () => {
     const res = validateMermaid(`graph TD`);
     expect(res.ok).toBe(false);
+  });
+
+  it("rejects a colon inside a bracketed label", () => {
+    const res = validateMermaid(`flowchart LR\n  A[Step: detail] --> B[End]`);
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects two chained edges on one flowchart line", () => {
+    const res = validateMermaid(`flowchart LR\n  A --> B  B --> C`);
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects a bare bracketed node with no ID on a flowchart edge", () => {
+    const res = validateMermaid(`flowchart LR\n  [WP0] --> [WP1]`);
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects flowchart arrows inside a mindmap", () => {
+    const res = validateMermaid(`mindmap\n  root((R))\n  A --> B`);
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects chained siblings with edge syntax inside a mindmap", () => {
+    const res = validateMermaid(`mindmap\n  root((R5))\n  A -- B\n  A -- C`);
+    expect(res.ok).toBe(false);
+  });
+
+  it("accepts a well-formed mindmap with indentation-only hierarchy", () => {
+    const src = `mindmap\n  root((Paper title))\n    Contribution 1\n      Detail A\n    Contribution 2`;
+    expect(validateMermaid(src)).toEqual({ ok: true });
+  });
+
+  it("accepts a labeled flowchart edge without flagging it as chained", () => {
+    const src = `flowchart LR\n  Q[User query] --> R{Cache hit?}\n  R -- yes --> C[Return cached]`;
+    expect(validateMermaid(src)).toEqual({ ok: true });
+  });
+});
+
+describe("validateAxisLabel", () => {
+  it("rejects an empty label", () => {
+    expect(validateAxisLabel("", "x").ok).toBe(false);
+    expect(validateAxisLabel(undefined, "y").ok).toBe(false);
+  });
+
+  it("rejects generic single-word placeholders", () => {
+    for (const bad of ["X", "Y", "Value", "Axis", "Metric", "Data", "tbd", "n/a"]) {
+      expect(validateAxisLabel(bad, "x").ok).toBe(false);
+    }
+  });
+
+  it("rejects a single generic word with no unit hint", () => {
+    expect(validateAxisLabel("Latency", "y").ok).toBe(false);
+  });
+
+  it("accepts a descriptive label with units", () => {
+    expect(validateAxisLabel("Latency (ms)", "y")).toEqual({ ok: true });
+    expect(validateAxisLabel("Sequence length (tokens)", "x")).toEqual({ ok: true });
+  });
+
+  it("accepts a multi-word descriptive label without explicit units", () => {
+    expect(validateAxisLabel("Model size", "x")).toEqual({ ok: true });
   });
 });
 
@@ -314,7 +376,7 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
     expect(body.response_format.json_schema.schema.additionalProperties).toBe(false);
   });
 
-  it("throws (no deterministic fallback) when strict Mermaid is invalid", async () => {
+  it("throws (no deterministic fallback) when strict Mermaid is persistently invalid, retrying up to maxAttempts", async () => {
     const fetchImpl = vi.fn(async () => {
       const payload = {
         title: "RNG topology",
@@ -330,10 +392,70 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
     await expect(
       generateVisual(
         { topic: "RNG expander graph topology", hint: "diagram" },
-        { env: { groqApiKey: "groq-token" }, maxAttempts: 4, fetchImpl },
+        { env: { groqApiKey: "groq-token" }, maxAttempts: 2, fetchImpl },
       ),
-    ).rejects.toThrow(/Failed to generate a valid visual via Groq strict mode/i);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    ).rejects.toThrow(/Failed to generate a valid visual after 2 attempts via Groq strict mode/i);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("defaults to 2 attempts on the Groq strict path when maxAttempts is not specified", async () => {
+    const fetchImpl = vi.fn(async () => {
+      const payload = {
+        title: "RNG topology",
+        narration: "The diagram maps RNG topology components.",
+        mermaid: "flowchart LR",
+      };
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    await expect(
+      generateVisual(
+        { topic: "RNG expander graph topology", hint: "diagram" },
+        { env: { groqApiKey: "groq-token" }, fetchImpl },
+      ),
+    ).rejects.toThrow(/Failed to generate a valid visual after 2 attempts/i);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers on retry when the first strict-mode attempt returns invalid mermaid", async () => {
+    const capturedBodies: Array<Record<string, unknown>> = [];
+    const badPayload = {
+      title: "RNG topology",
+      narration: "The diagram maps RNG topology components.",
+      mermaid: "flowchart LR",
+    };
+    const goodPayload = {
+      title: "RNG topology",
+      narration: "The graph contrasts hierarchical fat-tree links with flat expander connectivity.",
+      mermaid: "flowchart LR\n  A[Fat tree] --> B[Core]\n  C[Expander] --> D[Many cuts]",
+    };
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      capturedBodies.push(body);
+      const payload = capturedBodies.length === 1 ? badPayload : goodPayload;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const result = await generateVisual(
+      { topic: "RNG expander graph topology", hint: "diagram" },
+      { env: { groqApiKey: "groq-token" }, maxAttempts: 2, fetchImpl },
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.attempts).toBe(2);
+    expect(result.visual.kind).toBe("diagram");
+    // Second attempt's user message must carry the specific failure reason
+    // from the first attempt, and temperature must escalate downward.
+    const secondBody = capturedBodies[1] as { temperature: number; messages: Array<{ content: string }> };
+    expect(secondBody.temperature).toBeLessThan(0.5);
+    const userMessage = secondBody.messages.find((m) => m.content.includes("Topic:"))?.content ?? "";
+    expect(userMessage).toMatch(/PREVIOUS ATTEMPT FAILED/);
   });
 
 

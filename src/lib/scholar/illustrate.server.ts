@@ -224,6 +224,21 @@ const MERMAID_HEADERS = [
   "quadrantChart",
 ];
 
+// Edge operators recognized across flowchart/sequenceDiagram-style syntax.
+// Deliberately excludes bare "--" so labeled flowchart edges ("A -- label --> B")
+// still count as exactly one edge.
+const EDGE_OPERATOR_RE = /-->|-\.->|==>|--x|--o|->>|-->>|-x\b|-o\b/g;
+
+// A4: colons inside bracketed labels are reserved syntax in several diagram
+// types (they terminate the label early or get parsed as a relation). Catch
+// this regardless of diagram type since it's never valid inside a bracket.
+const COLON_IN_BRACKETS_RE = /\[[^[\]]*:[^[\]]*\]|\([^()]*:[^()]*\)|\{[^{}]*:[^{}]*\}/;
+
+// Mindmap bodies are indentation-only; any arrow-like token means the model
+// bled flowchart syntax into a mindmap — "the exact bug we keep hitting" per
+// the prompt guide.
+const MINDMAP_ARROW_RE = /-->|->|--|-\.|==/;
+
 export function validateMermaid(src: string): { ok: true } | { ok: false; reason: string } {
   const lines = src
     .split("\n")
@@ -231,7 +246,10 @@ export function validateMermaid(src: string): { ok: true } | { ok: false; reason
     .filter((l) => l.length > 0 && !l.startsWith("%%"));
   if (lines.length < 2) return { ok: false, reason: "needs a header line plus at least one body line" };
   const first = lines[0];
-  if (!MERMAID_HEADERS.some((h) => first === h || first.startsWith(`${h} `) || first.startsWith(`${h}\t`))) {
+  const header = MERMAID_HEADERS.find(
+    (h) => first === h || first.startsWith(`${h} `) || first.startsWith(`${h}\t`),
+  );
+  if (!header) {
     return {
       ok: false,
       reason: `first line must start with a mermaid diagram keyword (e.g. ${MERMAID_HEADERS.slice(0, 5).join(", ")}); got "${first}"`,
@@ -248,6 +266,96 @@ export function validateMermaid(src: string): { ok: true } | { ok: false; reason
     const c = (src.match(new RegExp(`\\${close}`, "g")) ?? []).length;
     if (o !== c) return { ok: false, reason: `unbalanced ${open}${close} in mermaid source (${o} vs ${c})` };
   }
+
+  const bodyLines = lines.slice(1);
+
+  for (const line of bodyLines) {
+    if (COLON_IN_BRACKETS_RE.test(line)) {
+      return {
+        ok: false,
+        reason: `line "${line}" has a ':' inside a bracketed label — use ' - ' instead (e.g. "A[Step - detail]")`,
+      };
+    }
+  }
+
+  if (header === "mindmap") {
+    for (const line of bodyLines) {
+      if (MINDMAP_ARROW_RE.test(line)) {
+        return {
+          ok: false,
+          reason: `mindmap line "${line}" contains arrow/edge syntax — mindmaps use indentation only, never --> or -- edges between siblings`,
+        };
+      }
+    }
+  } else if (header === "flowchart" || header === "graph") {
+    for (const line of bodyLines) {
+      const edges = line.match(EDGE_OPERATOR_RE) ?? [];
+      if (edges.length > 1) {
+        return {
+          ok: false,
+          reason: `line "${line}" chains ${edges.length} edges on one line — put each edge on its own line`,
+        };
+      }
+      if (edges.length === 1) {
+        const idx = line.indexOf(edges[0]);
+        const left = line.slice(0, idx).trim();
+        const right = line.slice(idx + edges[0].length).trim();
+        for (const [side, seg] of [
+          ["source", left],
+          ["target", right],
+        ] as const) {
+          if (/^[[({]/.test(seg)) {
+            return {
+              ok: false,
+              reason: `line "${line}" has a bare bracketed ${side} node with no ID — use "ID[Label]", not "[Label]"`,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+const GENERIC_AXIS_LABEL_RE =
+  /^(x|y|value|label|axis|tbd|n\/a|data|series|metric|category|categories|count)$/i;
+const AXIS_UNIT_HINT_RE =
+  /[(%]|\b(ms|s|sec|secs|seconds|min|mins|hours?|days?|tokens?|params?|parameters?|gb|mb|kb|bytes?|usd|flops?|epochs?|steps?|iterations?)\b/i;
+
+/** Cheap, deterministic positive quality check for a single chart axis label. */
+export function validateAxisLabel(
+  label: string | undefined,
+  axis: "x" | "y",
+): { ok: true } | { ok: false; reason: string } {
+  const trimmed = (label ?? "").trim();
+  if (!trimmed) {
+    return { ok: false, reason: `${axis}Label is empty — provide a descriptive axis label, ideally with units` };
+  }
+  if (trimmed.length < 4) {
+    return { ok: false, reason: `${axis}Label "${trimmed}" is too short to be a descriptive axis label` };
+  }
+  if (GENERIC_AXIS_LABEL_RE.test(trimmed)) {
+    return { ok: false, reason: `${axis}Label "${trimmed}" is a generic placeholder, not a descriptive label` };
+  }
+  const wordCount = trimmed.split(/\s+/).length;
+  if (wordCount < 2 && !AXIS_UNIT_HINT_RE.test(trimmed)) {
+    return {
+      ok: false,
+      reason: `${axis}Label "${trimmed}" is a single generic word with no unit — add units or more description (e.g. "Latency (ms)")`,
+    };
+  }
+  return { ok: true };
+}
+
+export function validateAxisLabels(chart: {
+  xLabel?: string;
+  yLabel?: string;
+} | undefined): { ok: true } | { ok: false; reason: string } {
+  const x = validateAxisLabel(chart?.xLabel, "x");
+  if (!x.ok) return x;
+  const y = validateAxisLabel(chart?.yLabel, "y");
+  if (!y.ok) return y;
   return { ok: true };
 }
 
@@ -403,14 +511,19 @@ G. SELF-CHECK (run mentally before returning the mermaid string)
 4. Is every ":" outside of bracketed labels (only allowed in sequenceDiagram messages, classDiagram relations, and stateDiagram transitions)?
 5. Is every edge / child on its own line?
 6. Are there at least 4 substantive nodes?
-If any answer is no, FIX IT before emitting.`;
+If any answer is no, FIX IT before emitting.
+
+================================================================
+H. RETRY CONTRACT
+================================================================
+If the user message contains a line starting with "PREVIOUS ATTEMPT FAILED:", that line names the EXACT rule your last output violated (a validator checked it mechanically). Fix ONLY that specific problem in your next output — do not regenerate the whole diagram/chart from scratch in a way that could reintroduce the same class of error.`;
 
 const SYSTEM_PROMPT = `You are a scientific visualization generator for a live research-companion slide deck. Each turn you produce ONE slide that makes the user smarter about the paper. Bias hard toward STRUCTURED, INFORMATION-DENSE visuals — never a bare restatement of the topic.
 
 KIND SELECTION (pick the first that fits, UNLESS the topic/hint explicitly requests a specific kind — then you MUST honor it):
 1. "diagram" — processes, architectures, pipelines, relationships, taxonomies, contribution maps. Lists of contributions/components/steps render as mermaid mindmap/flowchart, NOT a callout.
 2. "table" — comparisons, parameters, ablations, datasets, baselines. Prefer 3-6 columns and 3-8 rows of substantive content.
-3. "chart" — quantitative trends/comparisons. Include 8-15 realistic illustrative data points; mark them illustrative in the narration if inferred. ALWAYS populate xLabel and yLabel with descriptive axis labels including units (e.g. "Sequence length (tokens)", "Latency (ms)") — never leave axes unlabeled or generic.
+3. "chart" — quantitative trends/comparisons. Include 8-15 realistic illustrative data points; mark them illustrative in the narration if inferred. ALWAYS populate xLabel and yLabel with descriptive axis labels including units (e.g. "Sequence length (tokens)", "Latency (ms)") — never leave axes unlabeled or generic. A single generic word (e.g. "Latency" alone, or "X"/"Y"/"Value"/"Metric") is NOT descriptive enough — pair it with a unit or a second word, e.g. "Latency (ms)", "Model size (params)".
 4. "math" — formulas, losses, derivations, complexity, mathematical definitions. Each step is a KaTeX string (no $ delimiters).
 5. "callout" — FORBIDDEN. Never return kind="callout". Slides must always contain a real visual asset (diagram, chart, table, or equations). If the topic only suggests a quote or one-line takeaway, promote it to a diagram (mindmap or flowchart) or table that decomposes the idea into concrete parts.
 
@@ -474,6 +587,42 @@ export function containsHedgeLanguage(text: string | undefined | null): boolean 
 
 export function isPromptLikeVisualText(text: string | undefined | null): boolean {
   return Boolean(text && PROMPT_LIKE_VISUAL_TEXT_RE.test(text));
+}
+
+/**
+ * Content-level checks shared by every generation path (Groq strict and the
+ * legacy Gemini/Lovable loop), so a validation rule only has to be written
+ * once and both providers get retried against the same bar. Structural
+ * concerns (missing spec, invalid mermaid) and quality concerns (axis labels,
+ * hedging, prompt-echoing) all return a precise reason string, which flows
+ * straight into the "PREVIOUS ATTEMPT FAILED" retry correction.
+ */
+export function runContentValidations(visual: Visual): { ok: true } | { ok: false; reason: string } {
+  const structural = validateVisual(visual);
+  if (!structural.ok) return structural;
+
+  if (visual.kind === "chart") {
+    const axisCheck = validateAxisLabels(visual.chart);
+    if (!axisCheck.ok) return axisCheck;
+  }
+
+  const hedgeSource = [visual.narration, visual.callout?.body].find((t) => containsHedgeLanguage(t));
+  if (hedgeSource) {
+    return {
+      ok: false,
+      reason: `output contained hedge/meta language ("${hedgeSource.slice(0, 120)}"). Re-generate with concrete content using canonical textbook knowledge if the paper lacks specifics. No meta-commentary about the paper's contents.`,
+    };
+  }
+
+  const promptLikeSource = [visual.narration, visual.callout?.body].find((t) => isPromptLikeVisualText(t));
+  if (promptLikeSource) {
+    return {
+      ok: false,
+      reason: `output repeated the visualization prompt instead of rendering content ("${promptLikeSource.slice(0, 120)}"). Return concrete rows, equations, chart points, or mermaid nodes.`,
+    };
+  }
+
+  return { ok: true };
 }
 
 const KIND_KEYWORDS: Array<{ kind: Visual["kind"]; re: RegExp }> = [
@@ -724,7 +873,10 @@ MATH SHAPE (when kind=math) — KATEX SKILL (study carefully):
 CHART SHAPE (when kind=chart):
 - 8-15 realistic illustrative points per series.
 - "xLabel" and "yLabel" are MANDATORY, non-empty, descriptive strings (e.g. "Sequence length (tokens)", "Latency (ms)"). NEVER leave them blank, NEVER use generic placeholders like "X" or "Y" or "value". Include units when applicable.
-- The chart MUST be readable as a standalone figure: a viewer should understand what each axis measures from the labels alone.`;
+- A single generic word (e.g. "Latency" alone) is NOT enough — pair it with a unit or a second descriptive word: "Latency (ms)", "Model size (params)", "Training steps".
+- The chart MUST be readable as a standalone figure: a viewer should understand what each axis measures from the labels alone.
+- GOOD axis labels: "Sequence length (tokens)", "Throughput (req/s)", "Training loss", "Model size (params)".
+- BAD axis labels (DO NOT emit): "X", "Y", "Value", "Axis", "Metric", "Data" — these are placeholders, not descriptions.`;
 
 /** Pick the concrete kind to ask the strict-output model for. Never callout. */
 export function pickStrictKind(input: IllustrateInput): StrictKind {
@@ -738,7 +890,13 @@ export function pickStrictKind(input: IllustrateInput): StrictKind {
   return "diagram";
 }
 
-/** Call Groq's strict structured-output endpoint. Returns a validated Visual. */
+/**
+ * Call Groq's strict structured-output endpoint once. Returns whatever Visual
+ * the schema-constrained decode produced — transport/parse failures throw,
+ * but content-level correctness (valid mermaid, real axis labels, no hedging)
+ * is NOT checked here. That's the caller's job via `runContentValidations`,
+ * so both the Groq and legacy paths retry against exactly the same bar.
+ */
 export async function generateVisualGroqStrict(
   input: IllustrateInput,
   opts: {
@@ -747,17 +905,20 @@ export async function generateVisualGroqStrict(
     model?: string;
     fetchImpl?: FetchLike;
     recentBlock?: string;
+    correction?: string;
+    temperature?: number;
   },
 ): Promise<Visual> {
   const kind = opts.kind ?? pickStrictKind(input);
   const schema = STRICT_KIND_SCHEMAS[kind];
   const fetchImpl = opts.fetchImpl ?? (globalThis.fetch.bind(globalThis) as FetchLike);
   const model = opts.model ?? GROQ_MODELS.structured;
+  const temperature = opts.temperature ?? 0.5;
 
   const userPrompt = `Topic: ${input.topic}
 ${input.hint ? `Hint: ${input.hint}\n` : ""}${input.pdfExcerpt ? `Paper context (excerpt):\n${input.pdfExcerpt.slice(0, 8000)}\n` : ""}${opts.recentBlock ?? ""}
 Kind pre-selected by caller: ${kind}.
-Produce the JSON object for this kind with concrete, information-dense content.`;
+Produce the JSON object for this kind with concrete, information-dense content.${opts.correction ?? ""}`;
 
   const body = {
     model,
@@ -773,7 +934,7 @@ Produce the JSON object for this kind with concrete, information-dense content.`
         schema,
       },
     },
-    temperature: 0.5,
+    temperature,
     // Default Groq max_tokens is small (~1024) and routinely truncates
     // math/diagram strings full of backslashes, which then fail strict-mode
     // JSON validation with an empty `failed_generation`. Give the model
@@ -807,22 +968,15 @@ Produce the JSON object for this kind with concrete, information-dense content.`
       `Groq strict call returned non-JSON content despite strict mode: ${(err as Error).message}. Content head: ${content.slice(0, 200)}`,
     );
   }
-  const visual = strictPayloadToVisual(kind, payload);
-  const check = validateVisual(visual);
-  if (!check.ok) {
-    throw new Error(`Strict visual failed downstream validation: ${check.reason}`);
-  }
-  if (visual.kind === "chart") {
-    const bad = (s?: string) => !s || !s.trim() || /^(x|y|value|label|axis|tbd|n\/a)$/i.test(s.trim());
-    if (bad(visual.chart?.xLabel) || bad(visual.chart?.yLabel)) {
-      throw new Error(
-        `Strict chart missing descriptive axis labels (xLabel=${JSON.stringify(visual.chart?.xLabel)}, yLabel=${JSON.stringify(visual.chart?.yLabel)})`,
-      );
-    }
-  }
-  return visual;
+  return strictPayloadToVisual(kind, payload);
 }
 
+
+// Temperature ladder for Groq strict-mode retries. Groq only has one
+// structured-output-capable model (openai/gpt-oss-20b), so instead of
+// escalating models like the legacy path does, we escalate down toward
+// more deterministic output — keeping `strict: true` on every attempt.
+const GROQ_STRICT_TEMPERATURES = [0.5, 0.2, 0.0];
 
 export async function generateVisual(
   input: IllustrateInput,
@@ -848,14 +1002,6 @@ export async function generateVisual(
     throw err instanceof Error ? err : new Error(String(err));
   }
 
-  const maxAttempts = opts.maxAttempts ?? 4;
-  const runGenerateText = (opts.generateTextImpl ?? generateText) as GenerateTextLike;
-
-  const models =
-    resolved.source === "groq"
-      ? [GROQ_MODELS.fast]
-      : ["google/gemini-3-flash-preview", "google/gemini-2.5-flash", "google/gemini-2.5-pro"];
-
   const warnings: string[] = [];
   let lastError = "";
 
@@ -867,38 +1013,61 @@ export async function generateVisual(
     : "";
 
   // FAST PATH: Groq strict structured outputs. Constrained decoding guarantees
-  // schema-valid JSON. If the result is semantically invalid (hedge language,
-  // prompt-like narration, malformed Mermaid), surface the error to the caller
-  // instead of substituting a deterministic visual.
+  // schema-valid JSON on every attempt; a self-correction retry loop here
+  // catches the remaining content-level failures (invalid mermaid, missing
+  // axis labels, hedge language) and re-prompts with the specific reason,
+  // same contract as the legacy loop below.
   // Skipped if the caller injected a generateTextImpl (legacy test path) or
   // if there's no Groq key.
-  if (resolved.source === "groq" && env.groqApiKey && !opts.generateTextImpl) {
+  const useGroqStrict = resolved.source === "groq" && Boolean(env.groqApiKey) && !opts.generateTextImpl;
+  if (useGroqStrict) {
     const kind = pickStrictKind(input);
-    try {
-      const visual = await generateVisualGroqStrict(input, {
-        apiKey: env.groqApiKey,
-        kind,
-        fetchImpl: opts.fetchImpl,
-        recentBlock,
-      });
-      if (containsHedgeLanguage(visual.narration)) {
-        throw new Error(`strict (${GROQ_MODELS.structured}/${kind}): hedge language detected in narration`);
+    const maxAttempts = opts.maxAttempts ?? 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const temperature =
+        GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)];
+      const correction = lastError
+        ? `\n\nPREVIOUS ATTEMPT FAILED: ${lastError}\nReturn a corrected, complete JSON object that matches the schema exactly.`
+        : "";
+      try {
+        const visual = await generateVisualGroqStrict(input, {
+          apiKey: env.groqApiKey!,
+          kind,
+          fetchImpl: opts.fetchImpl,
+          recentBlock,
+          correction,
+          temperature,
+        });
+        const check = runContentValidations(visual);
+        if (!check.ok) {
+          lastError = check.reason;
+          warnings.push(`attempt ${attempt} (groq strict/${kind}): ${check.reason}`);
+          continue;
+        }
+        return { visual, attempts: attempt, warnings };
+      } catch (err) {
+        if (isBillingOrCreditError(err)) {
+          throw new Error(
+            `Groq rejected the request as unpaid/credits exhausted. Add credits or switch providers. (${err instanceof Error ? err.message : String(err)})`,
+          );
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        lastError = msg;
+        warnings.push(`attempt ${attempt} (groq strict/${kind}): ${msg}`);
       }
-      if (isPromptLikeVisualText(visual.narration)) {
-        throw new Error(`strict (${GROQ_MODELS.structured}/${kind}): prompt-like narration`);
-      }
-      return { visual, attempts: 1, warnings };
-    } catch (err) {
-      if (isBillingOrCreditError(err)) {
-        throw new Error(
-          `Groq rejected the request as unpaid/credits exhausted. Add credits or switch providers. (${err instanceof Error ? err.message : String(err)})`,
-        );
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to generate a valid visual via Groq strict mode (kind=${kind}): ${msg}`);
     }
+    throw new Error(
+      `Failed to generate a valid visual after ${maxAttempts} attempts via Groq strict mode (kind=${kind}). Last error: ${lastError || "unknown"}. Warnings: ${warnings.join(" | ")}`,
+    );
   }
 
+  const maxAttempts = opts.maxAttempts ?? 4;
+  const runGenerateText = (opts.generateTextImpl ?? generateText) as GenerateTextLike;
+
+  const models =
+    resolved.source === "groq"
+      ? [GROQ_MODELS.fast]
+      : ["google/gemini-3-flash-preview", "google/gemini-2.5-flash", "google/gemini-2.5-pro"];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const modelId = models[Math.min(attempt - 1, models.length - 1)];
@@ -946,34 +1115,16 @@ ${input.hint ? `Hint: ${input.hint}\n` : ""}${input.pdfExcerpt ? `Paper context 
         warnings.push(`attempt ${attempt} (${modelId}): rejected callout (text-only slide)`);
         continue;
       }
-      const check = validateVisual(normalized.visual);
-      if (!check.ok) {
-        lastError = check.reason;
-        warnings.push(`attempt ${attempt} (${modelId}): ${check.reason}`);
-        continue;
-      }
       const requestedKind = detectRequestedKind(input);
       if (requestedKind && requestedKind !== "callout" && normalized.visual.kind !== requestedKind) {
         lastError = `requested kind="${requestedKind}" but model returned kind="${normalized.visual.kind}". Re-generate as ${requestedKind} using canonical textbook knowledge if the paper lacks specifics.`;
         warnings.push(`attempt ${attempt} (${modelId}): ${lastError}`);
         continue;
       }
-      const hedgeSource = [
-        normalized.visual.narration,
-        normalized.visual.callout?.body,
-      ].find((t) => containsHedgeLanguage(t));
-      if (hedgeSource) {
-        lastError = `output contained hedge/meta language ("${hedgeSource.slice(0, 120)}"). Re-generate with concrete content using canonical textbook knowledge if the paper lacks specifics. No meta-commentary about the paper's contents.`;
-        warnings.push(`attempt ${attempt} (${modelId}): hedge language detected`);
-        continue;
-      }
-      const promptLikeSource = [
-        normalized.visual.narration,
-        normalized.visual.callout?.body,
-      ].find((t) => isPromptLikeVisualText(t));
-      if (promptLikeSource) {
-        lastError = `output repeated the visualization prompt instead of rendering content ("${promptLikeSource.slice(0, 120)}"). Return concrete rows, equations, chart points, or mermaid nodes.`;
-        warnings.push(`attempt ${attempt} (${modelId}): prompt-like visual text detected`);
+      const check = runContentValidations(normalized.visual);
+      if (!check.ok) {
+        lastError = check.reason;
+        warnings.push(`attempt ${attempt} (${modelId}): ${check.reason}`);
         continue;
       }
       return { visual: normalized.visual, attempts: attempt, warnings };
