@@ -32,6 +32,10 @@ export function MermaidView({ source, theme = "linearLight", onRenderError }: Pr
   const ref = useRef<HTMLDivElement>(null);
   const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`);
   const themeCfg = themes[theme];
+  // Held in a ref so a new callback identity from the parent never re-triggers
+  // the render effect (which would re-fire onRenderError in a loop).
+  const onRenderErrorRef = useRef(onRenderError);
+  onRenderErrorRef.current = onRenderError;
 
   useEffect(() => {
     let cancelled = false;
@@ -42,19 +46,19 @@ export function MermaidView({ source, theme = "linearLight", onRenderError }: Pr
       } catch (err) {
         // Don't render mermaid's own giant red "Syntax error" blob into the
         // canvas — instead blank the diagram body and let the host (via
-        // onRenderError) show an honest, contained error state.
+        // onRenderError) regenerate the slide or show a contained error state.
         if (!cancelled && ref.current) ref.current.innerHTML = "";
         const message = err instanceof Error ? err.message : String(err);
         if (typeof console !== "undefined") {
           console.warn("mermaid render failed", message);
         }
-        if (!cancelled) onRenderError?.(message);
+        if (!cancelled) onRenderErrorRef.current?.(message);
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [source, theme, onRenderError]);
+  }, [source, theme]);
 
   return (
     <div

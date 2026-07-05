@@ -45,7 +45,7 @@ describe("ensureScholarAgentId", () => {
     );
     // Regression: this list must include every tool the model is told it has,
     // otherwise ElevenLabs throws "LLM Cascade Error: Tool not found".
-    expect(patchToolNames).toEqual(["visualize", "research", "deep_think"]);
+    expect(patchToolNames).toEqual(["visualize", "research"]);
 
     // Cached: a second call must not hit the network.
     await expect(ensureScholarAgentId()).resolves.toBe("agent_existing");
@@ -72,7 +72,7 @@ describe("ensureScholarAgentId", () => {
     const toolNames = body.conversation_config.agent.prompt.tools.map(
       (t: { name: string }) => t.name,
     );
-    expect(toolNames).toEqual(["visualize", "research", "deep_think"]);
+    expect(toolNames).toEqual(["visualize", "research"]);
     // Overrides must be whitelisted so session-time prompt/firstMessage
     // overrides actually take effect.
     expect(

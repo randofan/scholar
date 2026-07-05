@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildClientTools,
   deliverContextualUpdate,
-  fetchDeepThink,
   fetchIllustration,
   fetchResearchBriefing,
   parseResearchResponse,
+  regenerateAfterRenderFailure,
 } from "./agent-tools";
 import { useScholarStore } from "./store";
 beforeEach(() => {
@@ -22,6 +22,7 @@ beforeEach(() => {
     canvasItems: [],
     researchItems: [],
     transcript: [],
+    lessons: [],
   });
 });
 
@@ -127,24 +128,64 @@ describe("illustrate client response handling (callout regression)", () => {
   });
 });
 
-describe("deep-think client response handling", () => {
-  it("turns a non-JSON pdf-qa response into a controlled error", async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response("upstream request timeout", {
-        status: 504,
-        statusText: "Gateway Timeout",
-      }),
-    );
+describe("regenerateAfterRenderFailure", () => {
+  const failingMermaid = "flowchart LR\n  A[Tokenizer] --> B[Model";
 
-    await expect(
-      fetchDeepThink(
-        { question: "what is ZipServ?", pdfText: "x", pdfTitle: "p" },
-        fetchImpl,
-        { attempts: 1, retryDelayMs: 0 },
-      ),
-    ).rejects.toThrow(
-      /Deep-think service returned a non-JSON response \(504 Gateway Timeout\): upstream request timeout/,
-    );
+  function seedRenderedDiagram(renderRetries?: number) {
+    useScholarStore.setState({
+      canvasItems: [
+        {
+          id: "vis-1",
+          title: "Inference pipeline",
+          narration: "Pipeline stages",
+          createdAt: Date.now(),
+          status: "ready" as const,
+          payload: { kind: "diagram" as const, spec: { mermaid: failingMermaid } },
+          request: { topic: "Inference pipeline", hint: "diagram" },
+          renderRetries,
+        },
+      ],
+    });
+  }
+
+  it("re-requests the slide with the renderer error and failing source attached", async () => {
+    seedRenderedDiagram();
+    const fixed = {
+      title: "Inference pipeline",
+      narration: "Pipeline stages",
+      kind: "diagram" as const,
+      diagram: { mermaid: "flowchart LR\n  A[Tokenizer] --> B[Model]" },
+    };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ ok: true, visual: fixed }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    regenerateAfterRenderFailure("vis-1", "Parse error on line 2");
+    expect(useScholarStore.getState().canvasItems[0].status).toBe("pending");
+
+    await waitForMicrotasks();
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body.renderFailure).toEqual({ source: failingMermaid, error: "Parse error on line 2" });
+    expect(body.topic).toBe("Inference pipeline");
+    const item = useScholarStore.getState().canvasItems[0];
+    expect(item.status).toBe("ready");
+    expect(item.renderRetries).toBe(1);
+    // The failure is also recorded as a session lesson for future slides.
+    expect(useScholarStore.getState().lessons.join(" ")).toContain("Parse error on line 2");
+  });
+
+  it("gives up with a visible error once the retry budget is exhausted", async () => {
+    seedRenderedDiagram(1);
+    const fetchImpl = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    regenerateAfterRenderFailure("vis-1", "Parse error on line 2");
+    await waitForMicrotasks();
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    const item = useScholarStore.getState().canvasItems[0];
+    expect(item.status).toBe("error");
+    expect(item.error).toMatch(/failed to render/i);
   });
 });
 

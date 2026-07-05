@@ -35,10 +35,6 @@ interface ResearchApiResponse {
   error?: string;
 }
 
-interface DeepThinkParams {
-  question: string;
-}
-
 function getPdfContext() {
   const pdf = useScholarStore.getState().pdf;
   return {
@@ -82,8 +78,8 @@ export async function parseResearchResponse(res: Response): Promise<ResearchApiR
 
 /**
  * POST JSON to an endpoint with retry on transient/non-JSON failures. All
- * tool client fetches (illustrate, research, pdf-qa) MUST go through this so
- * no caller ever calls `res.json()` directly on a possibly-non-JSON response.
+ * tool client fetches (illustrate, research) MUST go through this so no
+ * caller ever calls `res.json()` directly on a possibly-non-JSON response.
  */
 export async function postJsonWithRetry<TResp>(
   url: string,
@@ -145,6 +141,8 @@ interface IllustrateApiResponse {
     table?: unknown;
     callout?: unknown;
   };
+  /** Validator-rejection reasons the server had to correct via retry. */
+  warnings?: string[];
 }
 
 export async function fetchIllustration(
@@ -153,6 +151,8 @@ export async function fetchIllustration(
     hint?: string;
     pdfExcerpt?: string;
     recentVisuals?: Array<{ title: string; kind: CanvasSpec["kind"] }>;
+    renderFailure?: { source: string; error: string };
+    lessons?: string[];
   },
   fetchImpl: typeof fetch = fetch,
   opts: { attempts?: number; retryDelayMs?: number } = {},
@@ -161,26 +161,6 @@ export async function fetchIllustration(
     "/api/illustrate",
     payload,
     "Illustrate service",
-    fetchImpl,
-    opts,
-  );
-}
-
-interface DeepThinkApiResponse {
-  ok?: boolean;
-  error?: string;
-  answer?: string;
-}
-
-export async function fetchDeepThink(
-  payload: { question: string; pdfText: string; pdfTitle: string },
-  fetchImpl: typeof fetch = fetch,
-  opts: { attempts?: number; retryDelayMs?: number } = {},
-) {
-  return postJsonWithRetry<DeepThinkApiResponse>(
-    "/api/pdf-qa",
-    payload,
-    "Deep-think service",
     fetchImpl,
     opts,
   );
@@ -201,6 +181,100 @@ export function deliverContextualUpdate(host: ToolHost, text: string) {
   }
 }
 
+function visualToCanvasPayload(v: NonNullable<IllustrateApiResponse["visual"]>): CanvasSpec {
+  return v.kind === "chart"
+    ? ({ kind: "chart", spec: v.chart } as CanvasSpec)
+    : v.kind === "math"
+      ? ({ kind: "math", spec: v.math } as CanvasSpec)
+      : v.kind === "diagram"
+        ? ({ kind: "diagram", spec: v.diagram } as CanvasSpec)
+        : v.kind === "table"
+          ? ({ kind: "table", spec: v.table } as CanvasSpec)
+          : ({ kind: "callout", spec: v.callout } as CanvasSpec);
+}
+
+/**
+ * Distill server-side validator rejections into session lessons. Each warning
+ * looks like "attempt 1 (groq strict/diagram): <specific reason>" — the reason
+ * is the lesson; the attempt prefix is noise.
+ */
+function harvestLessons(warnings: string[] | undefined) {
+  if (!warnings?.length) return;
+  const { addLesson } = useScholarStore.getState();
+  for (const w of warnings) {
+    addLesson(w.replace(/^attempt \d+ \([^)]*\):\s*/i, ""));
+  }
+}
+
+function collectRecentVisuals(excludeId: string) {
+  return useScholarStore
+    .getState()
+    .canvasItems.filter((c) => c.id !== excludeId && c.status === "ready" && !!c.payload)
+    .slice(0, 6)
+    .map((c) => ({ title: c.title, kind: c.payload!.kind }));
+}
+
+// One client-initiated regeneration per slide. The regeneration itself gets
+// the server-side retry loop too, so a single render failure buys up to
+// (1 + maxAttempts) model calls total — enough to fix a syntax slip without
+// risking an infinite render-fail loop.
+const MAX_RENDER_RETRIES = 1;
+
+/**
+ * Called when mermaid.render() throws in the browser for a slide that passed
+ * all server-side validation. Feeds the renderer's exact error message and
+ * the failing source back into a fresh generation (closing the loop the
+ * server-side validators can't see), and records the failure as a session
+ * lesson so later slides avoid the same construct.
+ */
+export function regenerateAfterRenderFailure(itemId: string, renderError: string) {
+  const store = useScholarStore.getState;
+  const item = store().canvasItems.find((c) => c.id === itemId);
+  if (!item || item.status !== "ready" || item.payload?.kind !== "diagram") return;
+
+  const failedSource = item.payload.spec.mermaid;
+  const retries = item.renderRetries ?? 0;
+  store().addLesson(`mermaid that passed validation still failed to render: ${renderError}`);
+
+  if (retries >= MAX_RENDER_RETRIES) {
+    store().patchCanvas(itemId, {
+      status: "error",
+      error: `Diagram failed to render${retries > 0 ? " after a retry" : ""}: ${renderError}`,
+    });
+    return;
+  }
+
+  store().patchCanvas(itemId, { status: "pending", renderRetries: retries + 1 });
+
+  void (async () => {
+    try {
+      const ctx = getPdfContext();
+      const json = await fetchIllustration({
+        topic: item.request?.topic ?? item.title,
+        hint: item.request?.hint,
+        pdfExcerpt: ctx.text.slice(0, 30_000),
+        recentVisuals: collectRecentVisuals(itemId),
+        renderFailure: { source: failedSource, error: renderError },
+        lessons: store().lessons,
+      });
+      if (!json.visual) throw new Error(json.error ?? "no visual");
+      harvestLessons(json.warnings);
+      store().patchCanvas(itemId, {
+        status: "ready",
+        title: json.visual.title || item.title,
+        narration: json.visual.narration || item.narration,
+        payload: visualToCanvasPayload(json.visual),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "regeneration failed";
+      store().patchCanvas(itemId, {
+        status: "error",
+        error: `Diagram failed to render and regeneration failed: ${msg}`,
+      });
+    }
+  })();
+}
+
 
 export function buildClientTools(host: ToolHost) {
   const store = useScholarStore.getState;
@@ -214,6 +288,7 @@ export function buildClientTools(host: ToolHost) {
         narration: params.hint ?? "",
         createdAt: Date.now(),
         status: "pending",
+        request: { topic: params.topic, hint: params.hint },
       };
       store().upsertCanvas(item);
 
@@ -221,34 +296,22 @@ export function buildClientTools(host: ToolHost) {
       void (async () => {
         try {
           const ctx = getPdfContext();
-          const recentVisuals = store()
-            .canvasItems.filter((c) => c.id !== id && c.status === "ready" && !!c.payload)
-            .slice(0, 6)
-            .map((c) => ({ title: c.title, kind: c.payload!.kind }));
           const json = await fetchIllustration({
             topic: params.topic,
             hint: params.hint,
             pdfExcerpt: ctx.text.slice(0, 30_000),
-            recentVisuals,
+            recentVisuals: collectRecentVisuals(id),
+            lessons: store().lessons,
           });
           if (!json.visual) throw new Error(json.error ?? "no visual");
           const v = json.visual;
+          harvestLessons(json.warnings);
 
-          const payload =
-            v.kind === "chart"
-              ? ({ kind: "chart", spec: v.chart } as CanvasSpec)
-              : v.kind === "math"
-                ? ({ kind: "math", spec: v.math } as CanvasSpec)
-                : v.kind === "diagram"
-                  ? ({ kind: "diagram", spec: v.diagram } as CanvasSpec)
-                  : v.kind === "table"
-                    ? ({ kind: "table", spec: v.table } as CanvasSpec)
-                    : ({ kind: "callout", spec: v.callout } as CanvasSpec);
           store().patchCanvas(id, {
             status: "ready",
             title: v.title || params.topic,
             narration: v.narration || params.hint || "",
-            payload,
+            payload: visualToCanvasPayload(v),
           });
           deliverContextualUpdate(
             host,
@@ -265,9 +328,7 @@ export function buildClientTools(host: ToolHost) {
     },
 
     research: (params: ResearchParams) => {
-      const activeResearch = store().researchItems.find(
-        (item) => item.status === "pending" && !item.query.startsWith("Deep reasoning:"),
-      );
+      const activeResearch = store().researchItems.find((item) => item.status === "pending");
       if (activeResearch) {
         return `Research already in progress. Continue speaking; do not dispatch another research query for this turn.`;
       }
@@ -310,44 +371,6 @@ export function buildClientTools(host: ToolHost) {
       })();
 
       return `Research query "${params.query}" dispatched. Continue speaking; findings will arrive shortly.`;
-    },
-
-
-    deep_think: (params: DeepThinkParams) => {
-      const id = uid("think");
-      store().upsertResearch({
-        id,
-        query: `Deep reasoning: ${params.question}`,
-        status: "pending",
-        createdAt: Date.now(),
-      });
-
-      void (async () => {
-        try {
-          const ctx = getPdfContext();
-          const json = await fetchDeepThink({
-            question: params.question,
-            pdfText: ctx.text,
-            pdfTitle: ctx.title,
-          });
-          if (!json.answer) throw new Error(json.error ?? "deep think failed");
-
-          store().patchResearch(id, {
-            status: "ready",
-            summary: json.answer,
-          });
-          deliverContextualUpdate(
-            host,
-            `[DEEP_THINK RESULT for "${params.question}"]: ${json.answer ?? ""}`,
-          );
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "failed";
-          store().patchResearch(id, { status: "error", error: msg });
-          deliverContextualUpdate(host, `[DEEP_THINK FAILED: ${msg}]`);
-        }
-      })();
-
-      return `Working on it. I'll have the analysis in a moment.`;
     },
   };
 }

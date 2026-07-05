@@ -4,12 +4,31 @@ import {
   detectRequestedKind,
   generateVisual,
   isPromptLikeVisualText,
-  normalizeLoose,
   validateAxisLabel,
   validateMermaid,
   validateVisual,
   type Visual,
 } from "./illustrate.server";
+
+/** Build a Groq fetch mock returning the given strict-schema payloads in order (last repeats). */
+function groqFetchMock(payloads: Array<Record<string, unknown>>) {
+  const captured: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    captured.push({ url, body });
+    const payload = payloads[Math.min(captured.length - 1, payloads.length - 1)];
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  });
+  return { fetchImpl, captured };
+}
+
+const userPromptOf = (req: { body: Record<string, unknown> }) => {
+  const messages = req.body.messages as Array<{ role: string; content: string }>;
+  return messages.find((m) => m.role === "user")?.content ?? "";
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -115,166 +134,31 @@ describe("validateVisual", () => {
     expect(validateVisual(v)).toEqual({ ok: true });
   });
 
-  it("normalizes Cloudflare GLM top-level spec into diagram.mermaid", () => {
-    const res = normalizeLoose(
-      {
-        title: "BF16 pipeline",
-        narration: "The flow splits and reconstructs BF16 fields.",
-        kind: "diagram",
-        spec: "flowchart LR\n  A[Sign: 1 bit] --> B[Reconstruct]",
-      } as never,
-      { title: "fallback", narration: "fallback" },
-    );
-
-    expect(res.ok).toBe(true);
-    if (res.ok) {
-      expect(res.visual.diagram?.mermaid).toContain("Sign - 1 bit");
-      expect(validateVisual(res.visual)).toEqual({ ok: true });
-    }
-  });
 });
 
-describe("normalizeLoose — callout robustness (regression)", () => {
-  const fallback = { title: "Topic", narration: "Narration sentence" };
 
-  it("synthesizes a callout from narration when the callout field is missing", () => {
-    // Real-world failure: model returned kind=callout but no callout field.
-    const res = normalizeLoose({ kind: "callout" } as never, fallback);
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.visual.callout).toEqual({ body: "Narration sentence" });
-  });
-
-  it("synthesizes a callout from narration when callout is explicitly null", () => {
-    const res = normalizeLoose({ kind: "callout", callout: null } as never, fallback);
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.visual.callout?.body).toBe("Narration sentence");
-  });
-
-  it("falls back to title when narration is also missing", () => {
-    const res = normalizeLoose(
-      { kind: "callout" } as never,
-      { title: "Just a title", narration: "" },
-    );
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.visual.callout?.body).toBe("Just a title");
-  });
-
-  it("accepts callout as a bare string", () => {
-    const res = normalizeLoose(
-      { kind: "callout", callout: "hello world" } as never,
-      fallback,
-    );
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.visual.callout).toEqual({ body: "hello world" });
-  });
-
-  it.each(["text", "message", "content", "note"])(
-    "remaps misnamed body field '%s' onto callout.body",
-    (key) => {
-      const res = normalizeLoose(
-        { kind: "callout", callout: { [key]: "remapped" } } as never,
-        fallback,
-      );
-      expect(res.ok).toBe(true);
-      if (res.ok) expect(res.visual.callout?.body).toBe("remapped");
-    },
-  );
-
-  it("preserves a valid tone", () => {
-    const res = normalizeLoose(
-      { kind: "callout", callout: { body: "ok", tone: "warn" } } as never,
-      fallback,
-    );
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.visual.callout).toEqual({ body: "ok", tone: "warn" });
-  });
-
-  it("drops invalid tone values rather than failing", () => {
-    const res = normalizeLoose(
-      { kind: "callout", callout: { body: "ok", tone: "bogus" } } as never,
-      fallback,
-    );
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.visual.callout?.tone).toBeUndefined();
-  });
-
-  it("still fails (loudly) when a non-callout kind is missing its spec", () => {
-    // We only soften callouts — other kinds genuinely need their spec.
-    const res = normalizeLoose({ kind: "chart" } as never, fallback);
-    expect(res.ok).toBe(false);
-  });
-
-  it("normalized callout passes validateVisual", () => {
-    const res = normalizeLoose({ kind: "callout" } as never, fallback);
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(validateVisual(res.visual)).toEqual({ ok: true });
-  });
-});
-
-describe("generateVisual — never produces text-only callout slides", () => {
-  it("rejects model output with kind=callout and retries until a real visual comes back", async () => {
-    const callout = {
-      title: "Key theorem",
-      narration: "Convergence depends on a bounded variance assumption.",
-      kind: "callout",
-      callout: { body: "Convergence depends on a bounded variance assumption." },
-    };
-    const diagram = {
-      title: "Convergence pipeline",
-      narration: "The flow links the variance bound to step-size choice and convergence.",
-      kind: "diagram",
-      diagram: { mermaid: "flowchart LR\n  A[Bounded variance] --> B[Step size]\n  B --> C[Convergence]" },
-    };
-    const generateTextImpl = vi
-      .fn()
-      .mockResolvedValueOnce({ experimental_output: callout })
-      .mockResolvedValueOnce({ experimental_output: diagram });
-
-    const result = await generateVisual(
-      { topic: "Key insight from paper", hint: "callout: convergence depends on a bounded variance assumption" },
-      { env: { lovableApiKey: "test-key" }, maxAttempts: 4, generateTextImpl },
-    );
-
-    expect(generateTextImpl).toHaveBeenCalledTimes(2);
-    expect(result.visual.kind).not.toBe("callout");
-    expect(result.visual.kind).toBe("diagram");
-    expect(result.warnings.some((w) => /callout/i.test(w))).toBe(true);
-  });
-
-
+describe("generateVisual — provider errors", () => {
   it("throws a visible Payment Required error instead of fabricating a stub", async () => {
-    const generateTextImpl = vi.fn().mockRejectedValue(new Error("Payment Required"));
+    const fetchImpl = vi.fn(
+      async () => new Response("Payment Required", { status: 402, statusText: "Payment Required" }),
+    );
 
     await expect(
       generateVisual(
         { topic: "Attention sparsity tradeoff", hint: "diagram" },
-        { env: { lovableApiKey: "test-key" }, maxAttempts: 4, generateTextImpl },
+        { env: { groqApiKey: "groq-token" }, maxAttempts: 2, fetchImpl },
       ),
     ).rejects.toThrow(/credits exhausted|unpaid/i);
-    expect(generateTextImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("throws after exhausting attempts on persistently invalid output", async () => {
-    const generateTextImpl = vi.fn().mockResolvedValue({
-      experimental_output: { kind: "diagram", diagram: "not mermaid" },
-    });
-
-    await expect(
-      generateVisual(
-        { topic: "Broken generated diagram", hint: "show the architecture" },
-        { env: { lovableApiKey: "test-key" }, maxAttempts: 2, generateTextImpl },
-      ),
-    ).rejects.toThrow(/Failed to generate a valid visual/);
-    expect(generateTextImpl).toHaveBeenCalledTimes(2);
-  });
-
-  it("throws when no AI provider is configured at all", async () => {
+  it("throws when no GROQ_API_KEY is configured", async () => {
     await expect(
       generateVisual(
         { topic: "Mathematical formalism of expander graphs", hint: "math equations" },
         { env: {}, maxAttempts: 1 },
       ),
-    ).rejects.toThrow(/No AI provider configured/);
+    ).rejects.toThrow(/No AI provider configured.*GROQ_API_KEY/);
   });
 });
 
@@ -459,55 +343,45 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
   });
 
 
-  it("retries when the model returns a hedge callout for a math request", async () => {
-    const hedgeCallout = {
+
+  it("retries when the model returns hedge language in the narration", async () => {
+    const hedged = {
       title: "Mathematical Formalism",
       narration: "The paper does not provide explicit mathematical equations within the provided text.",
-      kind: "callout",
-      callout: { body: "The paper does not provide explicit mathematical equations." },
+      inline: "",
+      steps: ["h(G) = \\min \\frac{|E(S, \\bar S)|}{|S|}"],
     };
-    const realMath = {
+    const real = {
       title: "Edge Expansion (Math)",
       narration: "Edge expansion h(G) is the minimum boundary-to-volume ratio over small cuts.",
-      kind: "math",
-      math: {
-        steps: [
-          "h(G) = \\min_{|S| \\le |V|/2} \\frac{|E(S, \\bar S)|}{|S|}",
-          "\\lambda_2(G) \\le 2 h(G)",
-        ],
-      },
+      inline: "",
+      steps: ["h(G) = \\min_{|S| \\le |V|/2} \\frac{|E(S, \\bar S)|}{|S|}", "\\lambda_2(G) \\le 2 h(G)"],
     };
-    const generateTextImpl = vi
-      .fn()
-      .mockResolvedValueOnce({ experimental_output: hedgeCallout })
-      .mockResolvedValueOnce({ experimental_output: realMath });
+    const { fetchImpl, captured } = groqFetchMock([hedged, real]);
 
     const result = await generateVisual(
       {
-        topic: "Mathematical Formalism of Expander Graphs in RNG Paper",
+        topic: "Mathematical Formalism of Expander Graphs",
         hint: "math equations",
         pdfExcerpt: "Edge expansion is the core property...",
       },
-      { env: { lovableApiKey: "test-key" }, maxAttempts: 4, generateTextImpl },
+      { env: { groqApiKey: "groq-token" }, maxAttempts: 2, fetchImpl },
     );
 
-    expect(generateTextImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(result.visual.kind).toBe("math");
     expect(containsHedgeLanguage(result.visual.narration)).toBe(false);
+    expect(userPromptOf(captured[1])).toMatch(/PREVIOUS ATTEMPT FAILED.*hedge/is);
   });
 
   it("includes recentVisuals in the prompt so the model can avoid repeats", async () => {
-    const captured: Array<{ prompt: string }> = [];
-    const realDiagram = {
-      title: "Spraypoint routing",
-      narration: "Spraypoint distributes packets across many near-edge-disjoint paths.",
-      kind: "diagram",
-      diagram: { mermaid: "flowchart LR\n  A[Packet] --> B[Spray paths]" },
-    };
-    const generateTextImpl = vi.fn(async (args: Record<string, unknown>) => {
-      captured.push({ prompt: String(args.prompt) });
-      return { experimental_output: realDiagram };
-    });
+    const { fetchImpl, captured } = groqFetchMock([
+      {
+        title: "Spraypoint routing",
+        narration: "Spraypoint distributes packets across many near-edge-disjoint paths.",
+        mermaid: "flowchart LR\n  A[Packet] --> B[Spray paths]",
+      },
+    ]);
 
     await generateVisual(
       {
@@ -518,11 +392,62 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
           { title: "Edge expansion math", kind: "math" },
         ],
       },
-      { env: { lovableApiKey: "test-key" }, maxAttempts: 1, generateTextImpl },
+      { env: { groqApiKey: "groq-token" }, maxAttempts: 1, fetchImpl },
     );
 
-    expect(captured[0].prompt).toMatch(/DO NOT repeat/);
-    expect(captured[0].prompt).toMatch(/RNG vs Fat Tree/);
-    expect(captured[0].prompt).toMatch(/Edge expansion math/);
+    expect(userPromptOf(captured[0])).toMatch(/DO NOT repeat/);
+    expect(userPromptOf(captured[0])).toMatch(/RNG vs Fat Tree/);
+    expect(userPromptOf(captured[0])).toMatch(/Edge expansion math/);
+  });
+
+  it("seeds the FIRST attempt's correction with a browser render failure", async () => {
+    const { fetchImpl, captured } = groqFetchMock([
+      {
+        title: "Fixed diagram",
+        narration: "The pipeline connects tokenizer, model, and decoder stages.",
+        mermaid: "flowchart LR\n  A[Tokenizer] --> B[Model]\n  B --> C[Decoder]",
+      },
+    ]);
+
+    const result = await generateVisual(
+      {
+        topic: "Inference pipeline",
+        hint: "diagram",
+        renderFailure: {
+          source: "flowchart LR\n  A[Tokenizer] --> B[Model",
+          error: "Parse error on line 2: expecting SQE",
+        },
+      },
+      { env: { groqApiKey: "groq-token" }, maxAttempts: 2, fetchImpl },
+    );
+
+    expect(result.visual.kind).toBe("diagram");
+    const prompt = userPromptOf(captured[0]);
+    expect(prompt).toMatch(/PREVIOUS ATTEMPT FAILED/);
+    expect(prompt).toMatch(/failed in the browser renderer/);
+    expect(prompt).toMatch(/Parse error on line 2/);
+  });
+
+  it("injects session lessons into the prompt as known failure modes", async () => {
+    const { fetchImpl, captured } = groqFetchMock([
+      {
+        title: "Routing map",
+        narration: "The mindmap groups routing strategies by locality and cost.",
+        mermaid: "mindmap\n  root((Routing))\n    Local\n      ECMP\n    Global\n      Spray",
+      },
+    ]);
+
+    await generateVisual(
+      {
+        topic: "Routing strategies",
+        hint: "diagram",
+        lessons: ["mindmap bodies must never contain --> arrows"],
+      },
+      { env: { groqApiKey: "groq-token" }, maxAttempts: 1, fetchImpl },
+    );
+
+    const prompt = userPromptOf(captured[0]);
+    expect(prompt).toMatch(/KNOWN FAILURE MODES/);
+    expect(prompt).toMatch(/mindmap bodies must never contain/);
   });
 });

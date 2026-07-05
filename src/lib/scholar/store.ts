@@ -48,6 +48,10 @@ export interface CanvasItem {
   status: "pending" | "ready" | "error";
   error?: string;
   payload?: CanvasSpec;
+  /** Original visualize request, kept so a render failure can regenerate the slide. */
+  request?: { topic: string; hint?: string };
+  /** How many times this slide has been regenerated after a browser render failure. */
+  renderRetries?: number;
 }
 
 export interface ResearchCitation {
@@ -95,8 +99,18 @@ interface ScholarState {
   transcript: TranscriptEntry[];
   appendTranscript: (entry: TranscriptEntry) => void;
 
+  /**
+   * Session-scoped "lessons" — distilled generation-failure reasons (validator
+   * rejections, browser render errors) that get replayed into every visualize
+   * request so the generator stops repeating the same mistake. Deduped, capped.
+   */
+  lessons: string[];
+  addLesson: (lesson: string) => void;
+
   reset: () => void;
 }
+
+const MAX_LESSONS = 8;
 
 const createMemoryStorage = (): Storage => {
   const values = new Map<string, string>();
@@ -154,15 +168,23 @@ export const useScholarStore = create<ScholarState>()(
       appendTranscript: (entry) =>
         set((s) => ({ transcript: [...s.transcript, entry].slice(-200) })),
 
+      lessons: [],
+      addLesson: (lesson) =>
+        set((s) => {
+          const normalized = lesson.replace(/\s+/g, " ").trim().slice(0, 200);
+          if (!normalized || s.lessons.includes(normalized)) return {};
+          return { lessons: [...s.lessons, normalized].slice(-MAX_LESSONS) };
+        }),
+
       reset: () =>
-        set({ pdf: null, canvasItems: [], researchItems: [], transcript: [] }),
+        set({ pdf: null, canvasItems: [], researchItems: [], transcript: [], lessons: [] }),
     }),
     {
       name: "scholar-store",
       storage: createJSONStorage(() =>
         typeof window !== "undefined" ? window.sessionStorage : createMemoryStorage(),
       ),
-      partialize: (s) => ({ pdf: s.pdf }),
+      partialize: (s) => ({ pdf: s.pdf, lessons: s.lessons }),
     },
   ),
 );

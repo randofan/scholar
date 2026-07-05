@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateVisual, validateVisual } from "./illustrate.server";
 
 const hasGroq = !!process.env.GROQ_API_KEY;
-const hasLovable = !!process.env.LOVABLE_API_KEY;
-const runIf = hasGroq || hasLovable ? describe : describe.skip;
+const runIf = hasGroq ? describe : describe.skip;
 
 runIf("illustrate live generation", () => {
   it(
@@ -19,8 +18,8 @@ runIf("illustrate live generation", () => {
         { maxAttempts: 4 },
       );
       expect(validateVisual(result.visual).ok).toBe(true);
-      // If the AI gateway is unavailable (e.g. no credits in the test workspace),
-      // generateVisual must degrade to a valid local callout instead of failing.
+      // Kind depends on what the model picks for the hint;
+      // diagram is expected but any structured visual is acceptable.
       expect(["diagram", "chart", "table", "callout"]).toContain(result.visual.kind);
       if (result.visual.kind === "diagram") {
         expect(result.visual.diagram?.mermaid).toMatch(/(graph|flowchart|sequenceDiagram)/);

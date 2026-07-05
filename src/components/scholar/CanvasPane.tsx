@@ -1,4 +1,5 @@
 import { useScholarStore, type CanvasItem } from "@/lib/scholar/store";
+import { regenerateAfterRenderFailure } from "@/lib/scholar/agent-tools";
 import { ChartView } from "./a2ui/ChartView";
 import { MathView } from "./a2ui/MathView";
 import { MermaidView } from "./a2ui/MermaidView";
@@ -46,7 +47,6 @@ function SlideCard({
 
 export function CanvasPane() {
   const items = useScholarStore((s) => s.canvasItems);
-  const patchCanvas = useScholarStore((s) => s.patchCanvas);
 
   if (items.length === 0) {
     return (
@@ -85,9 +85,7 @@ export function CanvasPane() {
               {item.payload.kind === "diagram" && (
                 <MermaidView
                   source={item.payload.spec.mermaid}
-                  onRenderError={(message) =>
-                    patchCanvas(item.id, { status: "error", error: `Diagram failed to render: ${message}` })
-                  }
+                  onRenderError={(message) => regenerateAfterRenderFailure(item.id, message)}
                 />
               )}
               {item.payload.kind === "table" && <TableView spec={item.payload.spec} />}

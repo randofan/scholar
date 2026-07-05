@@ -1,12 +1,5 @@
-import { generateText, Output, NoObjectGeneratedError } from "ai";
 import { z } from "zod";
-import {
-  GROQ_BASE_URL,
-  GROQ_MODELS,
-  resolveAiProvider,
-  type AiProviderEnv,
-  type ResolvedAiProvider,
-} from "@/lib/ai-gateway";
+import { GROQ_BASE_URL, GROQ_MODELS } from "@/lib/ai-gateway";
 
 const ChartSpec = z.object({
   chartType: z.enum(["line", "bar", "area", "scatter"]),
@@ -30,37 +23,6 @@ const CalloutSpec = z.object({
   tone: z.enum(["info", "warn", "key"]).optional(),
 });
 
-// Permissive schema used during model generation — models frequently shortcut
-// `diagram: { mermaid: "..." }` to `diagram: "..."`, omit title/narration, or
-// emit `null` for unused spec fields. Normalize below before strict validation.
-const LooseVisualSchema = z.object({
-  title: z.string().optional().nullable(),
-  narration: z.string().optional().nullable(),
-  kind: z.enum(["chart", "math", "diagram", "table", "callout"]),
-  chart: z.any().optional().nullable(),
-  math: z.any().optional().nullable(),
-  diagram: z.any().optional().nullable(),
-  table: z.any().optional().nullable(),
-  callout: z.any().optional().nullable(),
-  mermaid: z.any().optional().nullable(),
-  columns: z.any().optional().nullable(),
-  rows: z.any().optional().nullable(),
-  chartType: z.any().optional().nullable(),
-  xKey: z.any().optional().nullable(),
-  yKeys: z.any().optional().nullable(),
-  data: z.any().optional().nullable(),
-  xLabel: z.any().optional().nullable(),
-  yLabel: z.any().optional().nullable(),
-  steps: z.any().optional().nullable(),
-  inline: z.any().optional().nullable(),
-  body: z.any().optional().nullable(),
-  tone: z.any().optional().nullable(),
-  text: z.any().optional().nullable(),
-  message: z.any().optional().nullable(),
-  content: z.any().optional().nullable(),
-  note: z.any().optional().nullable(),
-}).passthrough();
-
 export const VisualSchema = z.object({
   title: z.string(),
   narration: z.string().describe("One short sentence summarizing what's on screen"),
@@ -73,138 +35,6 @@ export const VisualSchema = z.object({
 });
 
 export type Visual = z.infer<typeof VisualSchema>;
-
-export function normalizeLoose(
-  raw: z.infer<typeof LooseVisualSchema>,
-  fallback: { title: string; narration: string },
-): { ok: true; visual: Visual } | { ok: false; reason: string } {
-  const title = (raw.title ?? "").trim() || fallback.title;
-  const narration = (raw.narration ?? "").trim() || fallback.narration;
-  const kind = raw.kind;
-  const base = { title, narration, kind } as const;
-
-  const coerce = (
-    field: "chart" | "math" | "diagram" | "table" | "callout",
-  ): unknown => {
-    const record = raw as Record<string, unknown>;
-    const nestedCandidates = [record.spec, record.visual, record.diagramSpec, record.payload]
-      .filter((v): v is Record<string, unknown> => Boolean(v && typeof v === "object" && !Array.isArray(v)));
-    const firstString = (keys: string[]) => {
-      for (const key of keys) {
-        if (typeof record[key] === "string") return record[key];
-        for (const nested of nestedCandidates) {
-          if (typeof nested[key] === "string") return nested[key];
-        }
-      }
-      for (const value of Object.values(record)) {
-        if (value && typeof value === "object" && !Array.isArray(value)) {
-          const obj = value as Record<string, unknown>;
-          for (const key of keys) if (typeof obj[key] === "string") return obj[key];
-        }
-      }
-      return undefined;
-    };
-    const v = raw[field];
-    if (v == null) {
-      if (field === "diagram") {
-        if (typeof record.spec === "string") return { mermaid: record.spec };
-        const mermaid = firstString(["mermaid", "mermaidDiagram", "mermaid_code", "diagramCode", "source", "code"]);
-        if (mermaid) return { mermaid };
-      }
-      if (field === "table") {
-        if (raw.columns && raw.rows) return { columns: raw.columns, rows: raw.rows };
-        // Model often nests table under spec/payload/visual/data, or returns
-        // { table: { columns, rows } } via a sibling object. Search for the
-        // first nested object that has both columns and rows arrays.
-        for (const nested of nestedCandidates) {
-          if (Array.isArray(nested.columns) && Array.isArray(nested.rows)) {
-            return { columns: nested.columns, rows: nested.rows };
-          }
-          if (nested.table && typeof nested.table === "object") return nested.table;
-        }
-        for (const value of Object.values(record)) {
-          if (value && typeof value === "object" && !Array.isArray(value)) {
-            const obj = value as Record<string, unknown>;
-            if (Array.isArray(obj.columns) && Array.isArray(obj.rows)) {
-              return { columns: obj.columns, rows: obj.rows };
-            }
-          }
-        }
-      }
-      if (field === "chart" && raw.chartType && raw.xKey && raw.yKeys && raw.data) {
-        return {
-          chartType: raw.chartType,
-          xKey: raw.xKey,
-          yKeys: raw.yKeys,
-          data: raw.data,
-          xLabel: raw.xLabel ?? undefined,
-          yLabel: raw.yLabel ?? undefined,
-        };
-      }
-      if (field === "math" && raw.steps) return { steps: raw.steps, inline: raw.inline ?? undefined };
-      if (field === "callout") {
-        const body = raw.body ?? raw.text ?? raw.message ?? raw.content ?? raw.note;
-        if (typeof body === "string") return { body, tone: raw.tone ?? undefined };
-      }
-      return undefined;
-    }
-    if (field === "diagram" && typeof v === "string") return { mermaid: v };
-    if (field === "callout" && typeof v === "string") return { body: v };
-    if (field === "math" && Array.isArray(v)) return { steps: v as string[] };
-    return v;
-  };
-
-  // Callouts are pure text and the model frequently omits the `callout` field
-  // entirely (putting the body in `narration`, or in misnamed fields like
-  // `text` / `message` / `content` / `note` / `body`). Build a guaranteed-valid
-  // spec from whatever is present so we never crash on missing structure.
-  const coerceCallout = (): { body: string; tone?: "info" | "warn" | "key" } => {
-    const direct = coerce("callout");
-    if (direct && typeof direct === "object") {
-      const o = direct as Record<string, unknown>;
-      const body =
-        (typeof o.body === "string" && o.body) ||
-        (typeof o.text === "string" && o.text) ||
-        (typeof o.message === "string" && o.message) ||
-        (typeof o.content === "string" && o.content) ||
-        (typeof o.note === "string" && o.note) ||
-        narration ||
-        title;
-      const tone =
-        o.tone === "info" || o.tone === "warn" || o.tone === "key"
-          ? (o.tone as "info" | "warn" | "key")
-          : undefined;
-      return tone ? { body: String(body), tone } : { body: String(body) };
-    }
-    // Last resort: synthesize from narration/title so a callout always renders.
-    return { body: narration || title };
-  };
-
-  try {
-    if (kind === "chart") {
-      const spec = ChartSpec.parse(coerce("chart"));
-      return { ok: true, visual: { ...base, chart: spec } };
-    }
-    if (kind === "math") {
-      const spec = MathSpec.parse(coerce("math"));
-      return { ok: true, visual: { ...base, math: spec } };
-    }
-    if (kind === "diagram") {
-      const parsed = DiagramSpec.parse(coerce("diagram"));
-      const spec = { mermaid: sanitizeMermaid(parsed.mermaid) };
-      return { ok: true, visual: { ...base, diagram: spec } };
-    }
-    if (kind === "table") {
-      const spec = TableSpec.parse(coerce("table"));
-      return { ok: true, visual: { ...base, table: spec } };
-    }
-    const spec = CalloutSpec.parse(coerceCallout());
-    return { ok: true, visual: { ...base, callout: spec } };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "spec parse failed";
-    return { ok: false, reason: `kind="${kind}" spec invalid: ${msg}` };
-  }
-}
 
 
 const MERMAID_HEADERS = [
@@ -518,38 +348,6 @@ H. RETRY CONTRACT
 ================================================================
 If the user message contains a line starting with "PREVIOUS ATTEMPT FAILED:", that line names the EXACT rule your last output violated (a validator checked it mechanically). Fix ONLY that specific problem in your next output — do not regenerate the whole diagram/chart from scratch in a way that could reintroduce the same class of error.`;
 
-const SYSTEM_PROMPT = `You are a scientific visualization generator for a live research-companion slide deck. Each turn you produce ONE slide that makes the user smarter about the paper. Bias hard toward STRUCTURED, INFORMATION-DENSE visuals — never a bare restatement of the topic.
-
-KIND SELECTION (pick the first that fits, UNLESS the topic/hint explicitly requests a specific kind — then you MUST honor it):
-1. "diagram" — processes, architectures, pipelines, relationships, taxonomies, contribution maps. Lists of contributions/components/steps render as mermaid mindmap/flowchart, NOT a callout.
-2. "table" — comparisons, parameters, ablations, datasets, baselines. Prefer 3-6 columns and 3-8 rows of substantive content.
-3. "chart" — quantitative trends/comparisons. Include 8-15 realistic illustrative data points; mark them illustrative in the narration if inferred. ALWAYS populate xLabel and yLabel with descriptive axis labels including units (e.g. "Sequence length (tokens)", "Latency (ms)") — never leave axes unlabeled or generic. A single generic word (e.g. "Latency" alone, or "X"/"Y"/"Value"/"Metric") is NOT descriptive enough — pair it with a unit or a second word, e.g. "Latency (ms)", "Model size (params)".
-4. "math" — formulas, losses, derivations, complexity, mathematical definitions. Each step is a KaTeX string (no $ delimiters).
-5. "callout" — FORBIDDEN. Never return kind="callout". Slides must always contain a real visual asset (diagram, chart, table, or equations). If the topic only suggests a quote or one-line takeaway, promote it to a diagram (mindmap or flowchart) or table that decomposes the idea into concrete parts.
-
-REQUESTED-KIND RULE (CRITICAL):
-- Topic/hint mentions "math", "equation", "formula", "formalism", "derivation", "theorem" → MUST return kind="math" with real KaTeX steps.
-- Mentions "diagram", "flow", "architecture", "pipeline", "graph", "topology", "tree" → MUST return kind="diagram" with valid mermaid.
-- Mentions "chart", "plot", "trend" → MUST return kind="chart".
-- Mentions "table", "matrix" → MUST return kind="table".
-- NEVER substitute a callout when the user asked for one of the above.
-
-NO-HEDGE RULE (CRITICAL):
-- NEVER produce text like "the paper does not provide", "no explicit equations", "not enough information", "the text does not contain", "insufficient detail", or any meta-commentary about the paper's contents.
-- If the paper excerpt lacks specifics, fall back to CANONICAL TEXTBOOK KNOWLEDGE of the topic (standard definitions, well-known equations, classical diagrams of the concept) and produce the visual from that. Note "illustrative" in the narration if needed, but DELIVER the visualization.
-- Narration MUST describe concrete on-screen content. Never start narration with "Diagram:", "Chart:", "A summary of", "Overview of", or similar meta-labels.
-
-QUALITY BAR:
-- Add information beyond restating the title. No slides whose body is just "A summary of X".
-- The topic/hint are instructions, not slide content; never render phrases like "A table comparing..." or "summarizing the..." as the visual body.
-- Plural topics enumerate the actual items with substance.
-- "narration" ≤20 words, references concrete content.
-- "title" ≤60 chars, specific.
-
-${MERMAID_DIAGRAM_GUIDE}
-
-OUTPUT: Return a single JSON object. Populate ONLY the chosen kind's spec field. The "kind" field MUST match the populated spec. Respond with valid JSON only, no prose.`;
-
 export interface IllustrateInput {
   topic: string;
   hint?: string;
@@ -561,6 +359,20 @@ export interface IllustrateInput {
    * slide because nothing in the loop checked prior visuals.
    */
   recentVisuals?: Array<{ title: string; kind: Visual["kind"] }>;
+  /**
+   * A browser-side render failure from a previous generation of this same
+   * request: the exact mermaid source that mermaid.render() rejected plus the
+   * renderer's error message. Seeds the first attempt's correction block so
+   * the model knows precisely what to fix.
+   */
+  renderFailure?: { source: string; error: string };
+  /**
+   * Rolling, session-scoped list of failure lessons harvested from earlier
+   * validator rejections and render failures. Injected into the prompt as
+   * "known failure modes" so the same mistake isn't repeated later in the
+   * session.
+   */
+  lessons?: string[];
 }
 
 export interface IllustrateResult {
@@ -569,13 +381,6 @@ export interface IllustrateResult {
   warnings: string[];
 }
 
-type GenerateTextLike = (args: Record<string, unknown>) => Promise<{
-  experimental_output?: unknown;
-  text?: string;
-}>;
-
-const EXPLICIT_CALLOUT_RE = /\b(quote|direct quote|definition sentence|definition|one[- ]line takeaway|single[- ]sentence takeaway|key takeaway)\b/i;
-const GENERIC_VISUAL_HINT_RE = /^(chart|line chart|bar chart|area chart|scatter|math|formula|diagram|table|callout)$/i;
 const HEDGE_RE = /\b(does not (provide|contain|include|describe|specify|mention)|not (enough|sufficient) (information|detail|context)|no (explicit|specific) (equations?|formulas?|diagrams?|details?|information)|the (paper|text|excerpt|document) (does not|doesn't|lacks)|insufficient (information|detail|context)|within the provided text|in the provided (text|excerpt))\b/i;
 const META_NARRATION_RE = /^\s*(diagram|chart|table|math|formula|equation|illustration|figure|visualization)\s*:/i;
 const PROMPT_LIKE_VISUAL_TEXT_RE = /^\s*(a\s+)?(chart|table|diagram|graph|math derivation|callout)\s+(comparing|summarizing|showing|illustrating|describing)\b|\bsummarizing the\b/i;
@@ -894,8 +699,7 @@ export function pickStrictKind(input: IllustrateInput): StrictKind {
  * Call Groq's strict structured-output endpoint once. Returns whatever Visual
  * the schema-constrained decode produced — transport/parse failures throw,
  * but content-level correctness (valid mermaid, real axis labels, no hedging)
- * is NOT checked here. That's the caller's job via `runContentValidations`,
- * so both the Groq and legacy paths retry against exactly the same bar.
+ * is NOT checked here. That's the retry loop's job via `runContentValidations`.
  */
 export async function generateVisualGroqStrict(
   input: IllustrateInput,
@@ -974,36 +778,33 @@ Produce the JSON object for this kind with concrete, information-dense content.$
 
 // Temperature ladder for Groq strict-mode retries. Groq only has one
 // structured-output-capable model (openai/gpt-oss-20b), so instead of
-// escalating models like the legacy path does, we escalate down toward
+// escalating models on retry, we escalate down toward
 // more deterministic output — keeping `strict: true` on every attempt.
 const GROQ_STRICT_TEMPERATURES = [0.5, 0.2, 0.0];
 
 export async function generateVisual(
   input: IllustrateInput,
   opts: {
-    apiKey?: string;
-    env?: AiProviderEnv;
-    resolvedProvider?: ResolvedAiProvider;
+    env?: { groqApiKey?: string };
     maxAttempts?: number;
-    generateTextImpl?: GenerateTextLike;
     fetchImpl?: FetchLike;
   } = {},
 ): Promise<IllustrateResult> {
-
-  const env = opts.env ?? {
-    groqApiKey: process.env.GROQ_API_KEY,
-    lovableApiKey: opts.apiKey || process.env.LOVABLE_API_KEY,
-  };
-  let resolved: ResolvedAiProvider;
-  try {
-    resolved = opts.resolvedProvider ?? resolveAiProvider(env);
-  } catch (err) {
-    // Surface the real reason — silently rendering a stub was hiding outages.
-    throw err instanceof Error ? err : new Error(String(err));
+  const groqApiKey = opts.env ? opts.env.groqApiKey : process.env.GROQ_API_KEY;
+  if (!groqApiKey) {
+    throw new Error("No AI provider configured. Set GROQ_API_KEY.");
   }
 
+  const maxAttempts = opts.maxAttempts ?? 2;
+  const kind = pickStrictKind(input);
   const warnings: string[] = [];
-  let lastError = "";
+
+  // A browser-side mermaid.render() failure from a prior generation seeds the
+  // correction block, so the very first attempt already knows the exact
+  // renderer error and the source that caused it.
+  let lastError = input.renderFailure
+    ? `the previously generated mermaid source failed in the browser renderer with "${input.renderFailure.error.slice(0, 300)}". The failing source was:\n${input.renderFailure.source.slice(0, 1200)}\nFix that exact syntax problem.`
+    : "";
 
   const recent = (input.recentVisuals ?? []).slice(0, 6);
   const recentBlock = recent.length
@@ -1012,141 +813,46 @@ export async function generateVisual(
         .join("\n")}\n`
     : "";
 
-  // FAST PATH: Groq strict structured outputs. Constrained decoding guarantees
-  // schema-valid JSON on every attempt; a self-correction retry loop here
-  // catches the remaining content-level failures (invalid mermaid, missing
-  // axis labels, hedge language) and re-prompts with the specific reason,
-  // same contract as the legacy loop below.
-  // Skipped if the caller injected a generateTextImpl (legacy test path) or
-  // if there's no Groq key.
-  const useGroqStrict = resolved.source === "groq" && Boolean(env.groqApiKey) && !opts.generateTextImpl;
-  if (useGroqStrict) {
-    const kind = pickStrictKind(input);
-    const maxAttempts = opts.maxAttempts ?? 2;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const temperature =
-        GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)];
-      const correction = lastError
-        ? `\n\nPREVIOUS ATTEMPT FAILED: ${lastError}\nReturn a corrected, complete JSON object that matches the schema exactly.`
-        : "";
-      try {
-        const visual = await generateVisualGroqStrict(input, {
-          apiKey: env.groqApiKey!,
-          kind,
-          fetchImpl: opts.fetchImpl,
-          recentBlock,
-          correction,
-          temperature,
-        });
-        const check = runContentValidations(visual);
-        if (!check.ok) {
-          lastError = check.reason;
-          warnings.push(`attempt ${attempt} (groq strict/${kind}): ${check.reason}`);
-          continue;
-        }
-        return { visual, attempts: attempt, warnings };
-      } catch (err) {
-        if (isBillingOrCreditError(err)) {
-          throw new Error(
-            `Groq rejected the request as unpaid/credits exhausted. Add credits or switch providers. (${err instanceof Error ? err.message : String(err)})`,
-          );
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        lastError = msg;
-        warnings.push(`attempt ${attempt} (groq strict/${kind}): ${msg}`);
-      }
-    }
-    throw new Error(
-      `Failed to generate a valid visual after ${maxAttempts} attempts via Groq strict mode (kind=${kind}). Last error: ${lastError || "unknown"}. Warnings: ${warnings.join(" | ")}`,
-    );
-  }
-
-  const maxAttempts = opts.maxAttempts ?? 4;
-  const runGenerateText = (opts.generateTextImpl ?? generateText) as GenerateTextLike;
-
-  const models =
-    resolved.source === "groq"
-      ? [GROQ_MODELS.fast]
-      : ["google/gemini-3-flash-preview", "google/gemini-2.5-flash", "google/gemini-2.5-pro"];
+  const lessons = (input.lessons ?? []).slice(0, 8);
+  const lessonsBlock = lessons.length
+    ? `\nKNOWN FAILURE MODES from earlier in this session — do NOT repeat these mistakes:\n${lessons.map((l) => `- ${l.slice(0, 200)}`).join("\n")}\n`
+    : "";
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const modelId = models[Math.min(attempt - 1, models.length - 1)];
-    const model = resolved.provider(modelId);
+    const temperature =
+      GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)];
     const correction = lastError
       ? `\n\nPREVIOUS ATTEMPT FAILED: ${lastError}\nReturn a corrected, complete JSON object that matches the schema exactly.`
       : "";
-    const prompt = `Topic: ${input.topic}
-${input.hint ? `Hint: ${input.hint}\n` : ""}${input.pdfExcerpt ? `Paper context (excerpt):\n${input.pdfExcerpt.slice(0, 8000)}\n` : ""}${recentBlock}${correction}`;
-
     try {
-      const { experimental_output: rawOut, text } = await runGenerateText({
-        model,
-        experimental_output: Output.object({ schema: LooseVisualSchema }),
-        system: SYSTEM_PROMPT,
-        prompt,
+      const visual = await generateVisualGroqStrict(input, {
+        apiKey: groqApiKey,
+        kind,
+        fetchImpl: opts.fetchImpl,
+        recentBlock: `${recentBlock}${lessonsBlock}`,
+        correction,
+        temperature,
       });
-      let loose: z.infer<typeof LooseVisualSchema> | undefined;
-      const generated = LooseVisualSchema.safeParse(rawOut);
-      if (generated.success) loose = generated.data;
-      if (!loose && text) {
-        // generateText didn't parse — try to recover from raw text.
-        const match = text.match(/\{[\s\S]*\}/);
-        if (match) {
-          const parsed = LooseVisualSchema.safeParse(JSON.parse(match[0]));
-          if (parsed.success) loose = parsed.data;
-        }
-      }
-      if (!loose) {
-        lastError = "model returned no parseable JSON object";
-        warnings.push(`attempt ${attempt} (${modelId}): ${lastError}`);
-        continue;
-      }
-      const normalized = normalizeLoose(loose, {
-        title: input.topic,
-        narration: input.hint ?? `Visualization of ${input.topic}`,
-      });
-      if (!normalized.ok) {
-        lastError = normalized.reason;
-        warnings.push(`attempt ${attempt} (${modelId}): ${normalized.reason}`);
-        continue;
-      }
-      if (normalized.visual.kind === "callout") {
-        lastError = `kind="callout" is forbidden — slides must always carry a real visual asset. Return kind="diagram" (mindmap or flowchart), "table", "chart", or "math" with concrete on-screen content.`;
-        warnings.push(`attempt ${attempt} (${modelId}): rejected callout (text-only slide)`);
-        continue;
-      }
-      const requestedKind = detectRequestedKind(input);
-      if (requestedKind && requestedKind !== "callout" && normalized.visual.kind !== requestedKind) {
-        lastError = `requested kind="${requestedKind}" but model returned kind="${normalized.visual.kind}". Re-generate as ${requestedKind} using canonical textbook knowledge if the paper lacks specifics.`;
-        warnings.push(`attempt ${attempt} (${modelId}): ${lastError}`);
-        continue;
-      }
-      const check = runContentValidations(normalized.visual);
+      const check = runContentValidations(visual);
       if (!check.ok) {
         lastError = check.reason;
-        warnings.push(`attempt ${attempt} (${modelId}): ${check.reason}`);
+        warnings.push(`attempt ${attempt} (groq strict/${kind}): ${check.reason}`);
         continue;
       }
-      return { visual: normalized.visual, attempts: attempt, warnings };
+      return { visual, attempts: attempt, warnings };
     } catch (err) {
-      const msg =
-        err instanceof NoObjectGeneratedError
-          ? `model returned non-conforming JSON (${err.message}). Raw text: ${(err.text ?? "").slice(0, 400)}`
-          : err instanceof Error
-            ? err.message
-            : "unknown generation error";
       if (isBillingOrCreditError(err)) {
-        // Surface visibly — silent stubs were hiding real outages.
         throw new Error(
-          `${resolved.source === "groq" ? "Groq" : "Lovable AI"} rejected the request as unpaid/credits exhausted. Add credits or switch providers. (${msg})`,
+          `Groq rejected the request as unpaid/credits exhausted. Add credits or check the GROQ_API_KEY. (${err instanceof Error ? err.message : String(err)})`,
         );
       }
+      const msg = err instanceof Error ? err.message : String(err);
       lastError = msg;
-      warnings.push(`attempt ${attempt} (${modelId}): ${msg}`);
+      warnings.push(`attempt ${attempt} (groq strict/${kind}): ${msg}`);
     }
   }
 
   throw new Error(
-    `Failed to generate a valid visual after ${maxAttempts} attempts via ${resolved.source}. Last error: ${lastError || "unknown"}. Warnings: ${warnings.join(" | ")}`,
+    `Failed to generate a valid visual after ${maxAttempts} attempts via Groq strict mode (kind=${kind}). Last error: ${lastError || "unknown"}. Warnings: ${warnings.join(" | ")}`,
   );
 }
