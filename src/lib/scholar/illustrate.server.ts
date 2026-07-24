@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { GoogleGenAI, Type } from "@google/genai";
 import { GROQ_BASE_URL, GROQ_MODELS } from "@/lib/ai-gateway";
+import { getCfBindings, type WorkersAiLike } from "@/lib/cf-bindings";
 
 const ChartSpec = z.object({
   chartType: z.enum(["line", "bar", "area", "scatter"]),
@@ -703,6 +705,18 @@ export function pickStrictKind(input: IllustrateInput): StrictKind {
   return "diagram";
 }
 
+/** Shared user-turn prompt across every provider — keeps the three generators in lockstep. */
+function buildStrictUserPrompt(
+  input: IllustrateInput,
+  kind: StrictKind,
+  opts: { recentBlock?: string; correction?: string },
+): string {
+  return `Topic: ${input.topic}
+${input.hint ? `Hint: ${input.hint}\n` : ""}${input.pdfExcerpt ? `Paper context (excerpt):\n${input.pdfExcerpt.slice(0, 8000)}\n` : ""}${opts.recentBlock ?? ""}
+Kind pre-selected by caller: ${kind}.
+Produce the JSON object for this kind with concrete, information-dense content.${opts.correction ?? ""}`;
+}
+
 /**
  * Call Groq's strict structured-output endpoint once. Returns whatever Visual
  * the schema-constrained decode produced — transport/parse failures throw,
@@ -726,11 +740,7 @@ export async function generateVisualGroqStrict(
   const fetchImpl = opts.fetchImpl ?? (globalThis.fetch.bind(globalThis) as FetchLike);
   const model = opts.model ?? GROQ_MODELS.structured;
   const temperature = opts.temperature ?? 0.5;
-
-  const userPrompt = `Topic: ${input.topic}
-${input.hint ? `Hint: ${input.hint}\n` : ""}${input.pdfExcerpt ? `Paper context (excerpt):\n${input.pdfExcerpt.slice(0, 8000)}\n` : ""}${opts.recentBlock ?? ""}
-Kind pre-selected by caller: ${kind}.
-Produce the JSON object for this kind with concrete, information-dense content.${opts.correction ?? ""}`;
+  const userPrompt = buildStrictUserPrompt(input, kind, opts);
 
   const body = {
     model,
@@ -783,6 +793,150 @@ Produce the JSON object for this kind with concrete, information-dense content.$
   return strictPayloadToVisual(kind, payload);
 }
 
+// Fast open-weights model on Workers AI with JSON-schema support — the
+// free-tier failover when Groq is rate-limited or out of credits.
+export const WORKERS_AI_VISUALIZE_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+function extractWorkersAiContent(result: unknown): string | null {
+  if (result && typeof result === "object" && "response" in result) {
+    const r = (result as { response: unknown }).response;
+    if (typeof r === "string") return r;
+    if (r && typeof r === "object") return JSON.stringify(r);
+  }
+  if (typeof result === "string") return result;
+  return null;
+}
+
+/** Second-hop failover: Cloudflare Workers AI, via the native env.AI binding. */
+export async function generateVisualWorkersAI(
+  input: IllustrateInput,
+  opts: {
+    ai: WorkersAiLike;
+    kind: StrictKind;
+    model?: string;
+    recentBlock?: string;
+    correction?: string;
+  },
+): Promise<Visual> {
+  const kind = opts.kind;
+  const schema = STRICT_KIND_SCHEMAS[kind];
+  const model = opts.model ?? WORKERS_AI_VISUALIZE_MODEL;
+  const userPrompt = buildStrictUserPrompt(input, kind, opts);
+
+  const result = await opts.ai.run(model, {
+    messages: [
+      { role: "system", content: STRICT_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: `visual_${kind}`, strict: true, schema },
+    },
+    max_tokens: 4096,
+  });
+
+  const content = extractWorkersAiContent(result);
+  if (!content) throw new Error("Workers AI returned empty content");
+  let payload: unknown;
+  try {
+    payload = JSON.parse(content);
+  } catch (err) {
+    throw new Error(
+      `Workers AI returned non-JSON content: ${(err as Error).message}. Content head: ${content.slice(0, 200)}`,
+    );
+  }
+  return strictPayloadToVisual(kind, payload);
+}
+
+// Third-hop failover: Gemini, structured output via @google/genai.
+export const GEMINI_VISUALIZE_MODEL = "gemini-3.1-flash-lite";
+
+/** Minimal contract for the Gemini call — lets tests inject a mock without instantiating the real client. */
+export type GeminiGenerateContentFn = (args: {
+  model: string;
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+  config: Record<string, unknown>;
+}) => Promise<{ text?: string }>;
+
+function defaultGeminiVisualizeImpl(apiKey: string): GeminiGenerateContentFn {
+  const ai = new GoogleGenAI({ apiKey });
+  return (args) => ai.models.generateContent(args);
+}
+
+/**
+ * STRICT_KIND_SCHEMAS are plain JSON Schema; Gemini's structured-output API
+ * wants its own Type enum instead of JSON Schema type strings. This walks
+ * the schema recursively so the three provider schemas can never drift out
+ * of sync with each other — there is exactly one schema per kind, not three.
+ */
+function toGeminiSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const type = schema.type;
+  if (type === "object") {
+    const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+    const out: Record<string, unknown> = {
+      type: Type.OBJECT,
+      properties: Object.fromEntries(Object.entries(properties).map(([k, v]) => [k, toGeminiSchema(v)])),
+    };
+    if (Array.isArray(schema.required)) out.required = schema.required;
+    return out;
+  }
+  if (type === "array") {
+    const items = (schema.items ?? { type: "string" }) as Record<string, unknown>;
+    return { type: Type.ARRAY, items: toGeminiSchema(items) };
+  }
+  if (type === "number") return { type: Type.NUMBER };
+  if (type === "string") {
+    const out: Record<string, unknown> = { type: Type.STRING };
+    if (Array.isArray(schema.enum)) out.enum = schema.enum;
+    return out;
+  }
+  return { type: Type.STRING };
+}
+
+export async function generateVisualGemini(
+  input: IllustrateInput,
+  opts: {
+    apiKey: string;
+    kind: StrictKind;
+    model?: string;
+    recentBlock?: string;
+    correction?: string;
+    generateContentImpl?: GeminiGenerateContentFn;
+  },
+): Promise<Visual> {
+  const kind = opts.kind;
+  const schema = toGeminiSchema(STRICT_KIND_SCHEMAS[kind]);
+  const model = opts.model ?? GEMINI_VISUALIZE_MODEL;
+  const generateContent = opts.generateContentImpl ?? defaultGeminiVisualizeImpl(opts.apiKey);
+  const userPrompt = buildStrictUserPrompt(input, kind, opts);
+
+  const { text } = await generateContent({
+    model,
+    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+    config: {
+      systemInstruction: STRICT_SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      responseSchema: schema,
+      thinkingConfig: { thinkingLevel: "low" },
+    },
+  });
+
+  if (!text) throw new Error("Gemini returned empty content");
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch (err) {
+    throw new Error(
+      `Gemini returned non-JSON content: ${(err as Error).message}. Content head: ${text.slice(0, 200)}`,
+    );
+  }
+  return strictPayloadToVisual(kind, payload);
+}
+
+function isRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b429\b|rate.?limit|too many requests|RESOURCE_EXHAUSTED|quota exceeded/i.test(msg);
+}
 
 // Temperature ladder for Groq strict-mode retries. Groq only has one
 // structured-output-capable model (openai/gpt-oss-20b), so instead of
@@ -790,20 +944,44 @@ Produce the JSON object for this kind with concrete, information-dense content.$
 // more deterministic output — keeping `strict: true` on every attempt.
 const GROQ_STRICT_TEMPERATURES = [0.5, 0.2, 0.0];
 
+export interface VisualizeEnv {
+  groqApiKey?: string;
+  workersAi?: WorkersAiLike;
+  geminiApiKey?: string;
+}
+
+interface VisualizeProviderSpec {
+  label: string;
+  maxAttempts: number;
+  attempt: (ctx: { attempt: number; correction: string }) => Promise<Visual>;
+}
+
+/**
+ * Generate a visual, cascading Groq -> Cloudflare Workers AI -> Gemini when a
+ * provider is rate-limited or out of credits (all three are free-tier
+ * options — this is purely about resilience, not quality preference). Within
+ * a single provider, a content-quality failure (invalid mermaid, missing
+ * axis labels, hedge language) retries that SAME provider with the specific
+ * failure reason injected as a correction — cascading to the next provider
+ * is reserved for availability failures, since a fresh provider can't fix a
+ * prompt-following problem any better than a retry can.
+ */
 export async function generateVisual(
   input: IllustrateInput,
   opts: {
-    env?: { groqApiKey?: string };
+    env?: VisualizeEnv;
     maxAttempts?: number;
     fetchImpl?: FetchLike;
+    generateContentImpl?: GeminiGenerateContentFn;
   } = {},
 ): Promise<IllustrateResult> {
-  const groqApiKey = opts.env ? opts.env.groqApiKey : process.env.GROQ_API_KEY;
-  if (!groqApiKey) {
-    throw new Error("No AI provider configured. Set GROQ_API_KEY.");
-  }
+  const env: VisualizeEnv = opts.env ?? {
+    groqApiKey: process.env.GROQ_API_KEY,
+    workersAi: getCfBindings().AI,
+    geminiApiKey: process.env.GEMINI_API_KEY,
+  };
 
-  const maxAttempts = opts.maxAttempts ?? 2;
+  const maxAttemptsPerProvider = opts.maxAttempts ?? 2;
   const kind = pickStrictKind(input);
   const warnings: string[] = [];
 
@@ -830,42 +1008,99 @@ export async function generateVisual(
   const skillBlock = skillRules.length
     ? `\nLEARNED RULES (distilled from failures in past sessions — follow ALL of these):\n${skillRules.map((r) => `- ${r.slice(0, 200)}`).join("\n")}\n`
     : "";
+  const sharedRecentBlock = `${recentBlock}${skillBlock}${lessonsBlock}`;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const temperature =
-      GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)];
-    const correction = lastError
-      ? `\n\nPREVIOUS ATTEMPT FAILED: ${lastError}\nReturn a corrected, complete JSON object that matches the schema exactly.`
-      : "";
-    try {
-      const visual = await generateVisualGroqStrict(input, {
-        apiKey: groqApiKey,
-        kind,
-        fetchImpl: opts.fetchImpl,
-        recentBlock: `${recentBlock}${skillBlock}${lessonsBlock}`,
-        correction,
-        temperature,
-      });
-      const check = runContentValidations(visual);
-      if (!check.ok) {
-        lastError = check.reason;
-        warnings.push(`attempt ${attempt} (groq strict/${kind}): ${check.reason}`);
-        continue;
+  const providers: VisualizeProviderSpec[] = [];
+  if (env.groqApiKey) {
+    providers.push({
+      label: "Groq strict mode",
+      maxAttempts: maxAttemptsPerProvider,
+      attempt: ({ attempt, correction }) =>
+        generateVisualGroqStrict(input, {
+          apiKey: env.groqApiKey!,
+          kind,
+          fetchImpl: opts.fetchImpl,
+          recentBlock: sharedRecentBlock,
+          correction,
+          temperature: GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)],
+        }),
+    });
+  }
+  if (env.workersAi) {
+    providers.push({
+      label: "Workers AI",
+      maxAttempts: maxAttemptsPerProvider,
+      attempt: ({ correction }) =>
+        generateVisualWorkersAI(input, {
+          ai: env.workersAi!,
+          kind,
+          recentBlock: sharedRecentBlock,
+          correction,
+        }),
+    });
+  }
+  if (env.geminiApiKey) {
+    providers.push({
+      label: "Gemini",
+      maxAttempts: maxAttemptsPerProvider,
+      attempt: ({ correction }) =>
+        generateVisualGemini(input, {
+          apiKey: env.geminiApiKey!,
+          kind,
+          recentBlock: sharedRecentBlock,
+          correction,
+          generateContentImpl: opts.generateContentImpl,
+        }),
+    });
+  }
+
+  if (!providers.length) {
+    throw new Error(
+      "No AI provider configured for visualize. Set GROQ_API_KEY, bind Workers AI (env.AI), or set GEMINI_API_KEY.",
+    );
+  }
+
+  let finalProviderLabel = "";
+  let finalAttempts = 0;
+  let lastErrorWasUnavailable = false;
+
+  for (const provider of providers) {
+    let providerAttempts = 0;
+    for (let attempt = 1; attempt <= provider.maxAttempts; attempt++) {
+      providerAttempts = attempt;
+      const correction = lastError
+        ? `\n\nPREVIOUS ATTEMPT FAILED: ${lastError}\nReturn a corrected, complete JSON object that matches the schema exactly.`
+        : "";
+      try {
+        const visual = await provider.attempt({ attempt, correction });
+        const check = runContentValidations(visual);
+        if (!check.ok) {
+          lastError = check.reason;
+          lastErrorWasUnavailable = false;
+          warnings.push(`attempt ${attempt} (${provider.label}/${kind}): ${check.reason}`);
+          continue;
+        }
+        return { visual, attempts: attempt, warnings };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (isBillingOrCreditError(err) || isRateLimitError(err)) {
+          lastErrorWasUnavailable = true;
+          warnings.push(`${provider.label}: unavailable (${msg}) — failing over to the next provider`);
+          lastError = ""; // fresh start for the next provider; this wasn't a content problem to "fix"
+          break;
+        }
+        lastError = msg;
+        lastErrorWasUnavailable = false;
+        warnings.push(`attempt ${attempt} (${provider.label}/${kind}): ${msg}`);
       }
-      return { visual, attempts: attempt, warnings };
-    } catch (err) {
-      if (isBillingOrCreditError(err)) {
-        throw new Error(
-          `Groq rejected the request as unpaid/credits exhausted. Add credits or check the GROQ_API_KEY. (${err instanceof Error ? err.message : String(err)})`,
-        );
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      lastError = msg;
-      warnings.push(`attempt ${attempt} (groq strict/${kind}): ${msg}`);
     }
+    finalProviderLabel = provider.label;
+    finalAttempts = providerAttempts;
   }
 
   throw new Error(
-    `Failed to generate a valid visual after ${maxAttempts} attempts via Groq strict mode (kind=${kind}). Last error: ${lastError || "unknown"}. Warnings: ${warnings.join(" | ")}`,
+    lastErrorWasUnavailable
+      ? `All configured providers are rate-limited or unpaid/credits exhausted (kind=${kind}). Add credits, wait for rate limits to reset, or configure another provider (GROQ_API_KEY, Workers AI binding, GEMINI_API_KEY). Warnings: ${warnings.join(" | ")}`
+      : `Failed to generate a valid visual after ${finalAttempts} attempts via ${finalProviderLabel} (kind=${kind}). Last error: ${lastError || "unknown"}. Warnings: ${warnings.join(" | ")}`,
   );
 }

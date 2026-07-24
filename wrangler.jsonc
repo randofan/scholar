@@ -7,6 +7,8 @@
   // R2 bucket holding generator skill files (create with:
   //   wrangler r2 bucket create scholar-skills)
   "r2_buckets": [{ "binding": "SKILLS", "bucket_name": "scholar-skills" }],
-  // Workers AI — used to distill session lessons into skill updates.
+  // Workers AI — distills session lessons into skill updates, and serves as
+  // the free-tier failover provider for visualize when Groq is rate-limited
+  // or out of credits (see generateVisual's provider cascade).
   "ai": { "binding": "AI" },
 }

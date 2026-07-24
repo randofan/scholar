@@ -494,3 +494,130 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
     expect(prompt).toMatch(/mindmap bodies must never contain/);
   });
 });
+
+describe("generateVisual — provider failover (Groq -> Workers AI -> Gemini)", () => {
+  const validDiagramPayload = {
+    title: "Fallback pipeline",
+    narration: "The pipeline routes requests through tokenizer, model, and decoder stages.",
+    mermaid: "flowchart LR\n  A[Tokenizer] --> B[Model]\n  B --> C[Decoder]",
+  };
+
+  it("fails over from Groq to Workers AI when Groq is rate-limited, without retrying Groq", async () => {
+    const groqFetch = vi.fn(
+      async () => new Response("rate limit exceeded", { status: 429, statusText: "Too Many Requests" }),
+    );
+    const workersAiRun = vi.fn(async () => ({ response: JSON.stringify(validDiagramPayload) }));
+
+    const result = await generateVisual(
+      { topic: "Inference pipeline", hint: "diagram" },
+      {
+        env: { groqApiKey: "groq-token", workersAi: { run: workersAiRun } },
+        maxAttempts: 2,
+        fetchImpl: groqFetch,
+      },
+    );
+
+    expect(groqFetch).toHaveBeenCalledTimes(1);
+    expect(workersAiRun).toHaveBeenCalledTimes(1);
+    expect(result.visual.kind).toBe("diagram");
+    expect(result.attempts).toBe(1);
+    expect(result.warnings.some((w) => /Groq strict mode.*unavailable.*failing over/i.test(w))).toBe(true);
+  });
+
+  it("fails over from Groq through Workers AI to Gemini when both are unavailable", async () => {
+    const groqFetch = vi.fn(async () => new Response("Payment Required", { status: 402 }));
+    const workersAiRun = vi.fn(async () => {
+      throw new Error("429 rate limited");
+    });
+    const geminiGenerateContent = vi.fn(async () => ({ text: JSON.stringify(validDiagramPayload) }));
+
+    const result = await generateVisual(
+      { topic: "Inference pipeline", hint: "diagram" },
+      {
+        env: { groqApiKey: "groq-token", workersAi: { run: workersAiRun }, geminiApiKey: "gemini-key" },
+        maxAttempts: 2,
+        fetchImpl: groqFetch,
+        generateContentImpl: geminiGenerateContent,
+      },
+    );
+
+    expect(groqFetch).toHaveBeenCalledTimes(1);
+    expect(workersAiRun).toHaveBeenCalledTimes(1);
+    expect(geminiGenerateContent).toHaveBeenCalledTimes(1);
+    expect(result.visual.kind).toBe("diagram");
+  });
+
+  it("throws a unified unavailable-providers message when every provider is rate-limited or unpaid", async () => {
+    const groqFetch = vi.fn(async () => new Response("Payment Required", { status: 402 }));
+    const workersAiRun = vi.fn(async () => {
+      throw new Error("429 Too Many Requests");
+    });
+    const geminiGenerateContent = vi.fn(async () => {
+      throw new Error("RESOURCE_EXHAUSTED: quota exceeded");
+    });
+
+    await expect(
+      generateVisual(
+        { topic: "Inference pipeline", hint: "diagram" },
+        {
+          env: { groqApiKey: "groq-token", workersAi: { run: workersAiRun }, geminiApiKey: "gemini-key" },
+          maxAttempts: 2,
+          fetchImpl: groqFetch,
+          generateContentImpl: geminiGenerateContent,
+        },
+      ),
+    ).rejects.toThrow(/rate-limited or unpaid\/credits exhausted/i);
+
+    expect(groqFetch).toHaveBeenCalledTimes(1);
+    expect(workersAiRun).toHaveBeenCalledTimes(1);
+    expect(geminiGenerateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT cascade to the next provider on a content validation failure — retries the same provider instead", async () => {
+    const badThenGood = [
+      { title: "x", narration: "y", mermaid: "not mermaid" },
+      validDiagramPayload,
+    ];
+    let call = 0;
+    const groqFetch = vi.fn(async () => {
+      const payload = badThenGood[Math.min(call, badThenGood.length - 1)];
+      call += 1;
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const workersAiRun = vi.fn(async () => ({ response: JSON.stringify(validDiagramPayload) }));
+
+    const result = await generateVisual(
+      { topic: "Inference pipeline", hint: "diagram" },
+      {
+        env: { groqApiKey: "groq-token", workersAi: { run: workersAiRun } },
+        maxAttempts: 2,
+        fetchImpl: groqFetch,
+      },
+    );
+
+    // Groq recovered on its own retry — Workers AI should never have been called.
+    expect(groqFetch).toHaveBeenCalledTimes(2);
+    expect(workersAiRun).not.toHaveBeenCalled();
+    expect(result.attempts).toBe(2);
+  });
+
+  it("Workers AI accepts a response payload that is already a JSON object, not a string", async () => {
+    const groqFetch = vi.fn(async () => new Response("rate limited", { status: 429 }));
+    const workersAiRun = vi.fn(async () => ({ response: validDiagramPayload }));
+
+    const result = await generateVisual(
+      { topic: "Inference pipeline", hint: "diagram" },
+      {
+        env: { groqApiKey: "groq-token", workersAi: { run: workersAiRun } },
+        maxAttempts: 1,
+        fetchImpl: groqFetch,
+      },
+    );
+
+    expect(result.visual.kind).toBe("diagram");
+    expect(result.visual.diagram?.mermaid).toContain("Tokenizer");
+  });
+});
