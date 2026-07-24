@@ -42,27 +42,9 @@ export const Route = createFileRoute("/api/research")({
         } catch (err) {
           const msg = err instanceof Error ? err.message : "unknown error";
           console.error("research error", msg);
-          // Classify upstream provider failures (quota/rate-limit/credits/5xx)
-          // as a graceful degradation: return 200 + fallback so the route does
-          // not surface as a runtime 500 to the client. The voice agent's
-          // research tool already handles { ok: false } by reporting the
-          // failure to the user and moving on.
-          const isUpstreamDegraded =
-            /quota|rate[- ]?limit|RESOURCE_EXHAUSTED|credits? exhausted|unpaid|429|503|temporarily unavailable/i.test(
-              msg,
-            );
-          if (isUpstreamDegraded) {
-            return new Response(
-              JSON.stringify({
-                ok: false,
-                fallback: true,
-                error:
-                  "Background research is temporarily unavailable (upstream quota or rate limit). Continuing without web grounding.",
-                detail: msg,
-              }),
-              { status: 200, headers: corsHeaders },
-            );
-          }
+          // Surface failures honestly as a 500. The voice agent's research
+          // tool catches this, reports "research unavailable" to the user,
+          // and continues without web grounding.
           return new Response(JSON.stringify({ ok: false, error: msg }), {
             status: 500,
             headers: corsHeaders,

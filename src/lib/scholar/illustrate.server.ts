@@ -401,12 +401,11 @@ export function isPromptLikeVisualText(text: string | undefined | null): boolean
 }
 
 /**
- * Content-level checks shared by every generation path (Groq strict and the
- * legacy Gemini/Lovable loop), so a validation rule only has to be written
- * once and both providers get retried against the same bar. Structural
- * concerns (missing spec, invalid mermaid) and quality concerns (axis labels,
- * hedging, prompt-echoing) all return a precise reason string, which flows
- * straight into the "PREVIOUS ATTEMPT FAILED" retry correction.
+ * Content-level checks run on every generated visual before it's accepted, so
+ * a validation rule is written once and each retry attempt is held to the same
+ * bar. Structural concerns (missing spec, invalid mermaid) and quality concerns
+ * (axis labels, hedging, prompt-echoing) all return a precise reason string,
+ * which flows straight into the "PREVIOUS ATTEMPT FAILED" retry correction.
  */
 export function runContentValidations(visual: Visual): { ok: true } | { ok: false; reason: string } {
   const structural = validateVisual(visual);

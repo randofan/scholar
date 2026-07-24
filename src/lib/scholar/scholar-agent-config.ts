@@ -4,7 +4,7 @@
 
 // Stable name we look up / create on the user's ElevenLabs workspace.
 // Changing this is a one-way migration: a new agent will be created.
-export const SCHOLAR_AGENT_NAME = "Lovable Scholar (auto)";
+export const SCHOLAR_AGENT_NAME = "Scholar (auto)";
 
 // Base system prompt baked into the agent. The per-PDF prompt is applied
 // at session start via conversation_config overrides (see voice-session.ts).
@@ -108,7 +108,7 @@ export function buildScholarAgentConfigBody() {
 export function buildScholarAgentCreatePayload() {
   return {
     name: SCHOLAR_AGENT_NAME,
-    tags: ["lovable-scholar", "auto-provisioned"],
+    tags: ["scholar", "auto-provisioned"],
     ...buildScholarAgentConfigBody(),
   };
 }
