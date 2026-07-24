@@ -214,6 +214,53 @@ function collectRecentVisuals(excludeId: string) {
     .map((c) => ({ title: c.title, kind: c.payload!.kind }));
 }
 
+/** The single most likely first slide for any paper: an architecture/pipeline overview. */
+export function guessSpeculativeVisualTopic(pdfName: string): { topic: string; hint: string } {
+  const titleGuess =
+    pdfName
+      .replace(/\.pdf$/i, "")
+      .replace(/[_-]+/g, " ")
+      .trim() || "this paper";
+  return {
+    topic: `${titleGuess} — architecture overview`,
+    hint: "diagram: overall pipeline or system architecture",
+  };
+}
+
+/**
+ * Speculatively pre-generates the likely first slide as soon as a PDF is
+ * loaded, so its result lands in the server-side R2 visual cache (see
+ * visual-cache.server.ts) before the agent ever calls `visualize`. If the
+ * agent later requests a matching topic, that request is a cache hit —
+ * near-instant instead of a fresh Groq/Workers AI/Gemini round trip.
+ *
+ * Mirrors dispatchPreemptiveResearch's fire-and-forget pattern, but nothing
+ * is written to the canvas here: the user hasn't asked for a slide yet, so
+ * this must stay invisible unless/until a real `visualize` call reuses it.
+ */
+export function dispatchSpeculativeVisual(
+  pdfName: string,
+  pdfText: string,
+  fetchImpl: typeof fetch = fetch,
+) {
+  const { topic, hint } = guessSpeculativeVisualTopic(pdfName);
+  void fetchIllustration(
+    {
+      topic,
+      hint,
+      pdfExcerpt: pdfText.slice(0, 30_000),
+      lessons: useScholarStore.getState().lessons,
+    },
+    fetchImpl,
+    { attempts: 1 },
+  ).catch((err) => {
+    console.warn(
+      "speculative visual pre-generation failed",
+      err instanceof Error ? err.message : err,
+    );
+  });
+}
+
 /**
  * Distill this session's not-yet-distilled failure lessons into the
  * persistent R2 skill file (via Workers AI on the server). Called when a
@@ -227,13 +274,9 @@ export async function distillSessionLessons(fetchImpl: typeof fetch = fetch) {
   if (lessons.length <= distilledLessonCount) return;
 
   try {
-    await postJsonWithRetry(
-      "/api/skills",
-      { lessons },
-      "Skills service",
-      fetchImpl,
-      { attempts: 1 },
-    );
+    await postJsonWithRetry("/api/skills", { lessons }, "Skills service", fetchImpl, {
+      attempts: 1,
+    });
     store().markLessonsDistilled(lessons.length);
   } catch (err) {
     // Non-fatal: lessons stay in the session store and the next session end
@@ -303,7 +346,6 @@ export function regenerateAfterRenderFailure(itemId: string, renderError: string
   })();
 }
 
-
 export function buildClientTools(host: ToolHost) {
   const store = useScholarStore.getState;
 
@@ -341,10 +383,7 @@ export function buildClientTools(host: ToolHost) {
             narration: v.narration || params.hint || "",
             payload: visualToCanvasPayload(v),
           });
-          deliverContextualUpdate(
-            host,
-            `[VISUAL READY on canvas: "${v.title}" — ${v.narration}]`,
-          );
+          deliverContextualUpdate(host, `[VISUAL READY on canvas: "${v.title}" — ${v.narration}]`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : "failed";
           store().patchCanvas(id, { status: "error", error: msg });
@@ -372,11 +411,15 @@ export function buildClientTools(host: ToolHost) {
       void (async () => {
         try {
           const ctx = getPdfContext();
-          const json = await fetchResearchBriefing({
-            query: params.query,
-            pdfExcerpt: ctx.text.slice(0, 12_000),
-            scope: params.scope,
-          }, fetch, { attempts: 1 });
+          const json = await fetchResearchBriefing(
+            {
+              query: params.query,
+              pdfExcerpt: ctx.text.slice(0, 12_000),
+              scope: params.scope,
+            },
+            fetch,
+            { attempts: 1 },
+          );
           store().patchResearch(id, {
             status: "ready",
             summary: json.summary,

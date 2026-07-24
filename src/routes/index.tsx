@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { extractPdfText } from "@/lib/scholar/pdf";
+import { dispatchSpeculativeVisual } from "@/lib/scholar/agent-tools";
 import { useScholarStore } from "@/lib/scholar/store";
 import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -43,6 +44,10 @@ function Index() {
         setProgress(`Parsing page ${p}/${t}…`),
       );
       setPdf({ name: file.name, text, pages, charCount: text.length });
+      // Warm the visual cache in the background while the user reads the
+      // /session screen and connects the voice agent — by the time they ask
+      // for the paper's architecture, it may already be ready.
+      dispatchSpeculativeVisual(file.name, text);
       navigate({ to: "/session" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to parse PDF");
@@ -70,7 +75,9 @@ function Index() {
             if (f) void handleFile(f);
           }}
           className={`group flex cursor-pointer flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed bg-card p-16 text-center transition-all ${
-            dragging ? "border-primary bg-primary/5 scale-[1.01]" : "border-border hover:border-primary/60 hover:bg-card/80"
+            dragging
+              ? "border-primary bg-primary/5 scale-[1.01]"
+              : "border-border hover:border-primary/60 hover:bg-card/80"
           } ${parsing ? "pointer-events-none opacity-70" : ""} ring-glow`}
         >
           {parsing ? (
@@ -82,9 +89,7 @@ function Index() {
             <>
               <Upload className="h-10 w-10 text-primary" />
               <div className="space-y-1.5">
-                <p className="text-xl font-semibold tracking-tight">
-                  Drop a PDF to start learning
-                </p>
+                <p className="text-xl font-semibold tracking-tight">Drop a PDF to start learning</p>
                 <p className="text-sm text-muted-foreground">
                   Drag &amp; drop your paper here, or click anywhere in this box
                 </p>

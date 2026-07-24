@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildClientTools,
   deliverContextualUpdate,
+  dispatchSpeculativeVisual,
   distillSessionLessons,
   fetchIllustration,
   fetchResearchBriefing,
+  guessSpeculativeVisualTopic,
   parseResearchResponse,
   regenerateAfterRenderFailure,
 } from "./agent-tools";
@@ -19,7 +21,12 @@ beforeEach(() => {
     },
   });
   useScholarStore.setState({
-    pdf: { name: "paper.pdf", text: "Paper excerpt about sparse attention and retrieval.", pages: 3, charCount: 64 },
+    pdf: {
+      name: "paper.pdf",
+      text: "Paper excerpt about sparse attention and retrieval.",
+      pages: 3,
+      charCount: 64,
+    },
     canvasItems: [],
     researchItems: [],
     transcript: [],
@@ -69,11 +76,12 @@ describe("research client response handling", () => {
   });
 
   it("returns a useful final error if every retry gets non-JSON", async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
-      new Response("upstream request timeout", {
-        status: 503,
-        statusText: "Service Unavailable",
-      }),
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response("upstream request timeout", {
+          status: 503,
+          statusText: "Service Unavailable",
+        }),
     );
 
     await expect(
@@ -81,7 +89,9 @@ describe("research client response handling", () => {
         attempts: 2,
         retryDelayMs: 0,
       }),
-    ).rejects.toThrow(/Research service returned a non-JSON response \(503 Service Unavailable\): upstream request timeout/);
+    ).rejects.toThrow(
+      /Research service returned a non-JSON response \(503 Service Unavailable\): upstream request timeout/,
+    );
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
@@ -96,11 +106,10 @@ describe("illustrate client response handling (callout regression)", () => {
     );
 
     await expect(
-      fetchIllustration(
-        { topic: "ZipServ's Key Innovations", hint: "callout" },
-        fetchImpl,
-        { attempts: 1, retryDelayMs: 0 },
-      ),
+      fetchIllustration({ topic: "ZipServ's Key Innovations", hint: "callout" }, fetchImpl, {
+        attempts: 1,
+        retryDelayMs: 0,
+      }),
     ).rejects.toThrow(
       /Illustrate service returned a non-JSON response \(502 Bad Gateway\): upstream request timeout/,
     );
@@ -118,15 +127,67 @@ describe("illustrate client response handling (callout regression)", () => {
       .mockResolvedValueOnce(new Response("upstream request timeout", { status: 502 }))
       .mockResolvedValueOnce(Response.json({ ok: true, visual }));
 
-    const result = await fetchIllustration(
-      { topic: "ZipServ's Key Innovations" },
-      fetchImpl,
-      { attempts: 2, retryDelayMs: 0 },
-    );
+    const result = await fetchIllustration({ topic: "ZipServ's Key Innovations" }, fetchImpl, {
+      attempts: 2,
+      retryDelayMs: 0,
+    });
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(result.visual?.kind).toBe("callout");
     expect(result.visual?.title).toBe("ZipServ's Key Innovations");
+  });
+});
+
+describe("guessSpeculativeVisualTopic", () => {
+  it("derives a human-readable title from the filename", () => {
+    expect(guessSpeculativeVisualTopic("attention_is_all-you_need.pdf")).toEqual({
+      topic: "attention is all you need — architecture overview",
+      hint: "diagram: overall pipeline or system architecture",
+    });
+  });
+
+  it("falls back to a generic title for an unhelpful filename", () => {
+    expect(guessSpeculativeVisualTopic(".pdf").topic).toBe("this paper — architecture overview");
+  });
+});
+
+describe("dispatchSpeculativeVisual", () => {
+  it("fires an illustrate request for the guessed overview topic without touching the canvas", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        ok: true,
+        visual: {
+          title: "Overview",
+          narration: "n",
+          kind: "diagram",
+          diagram: { mermaid: "flowchart LR\n  A --> B" },
+        },
+      }),
+    );
+
+    dispatchSpeculativeVisual(
+      "sparse-retrieval.pdf",
+      "Paper body text about sparse retrieval.",
+      fetchImpl,
+    );
+    await waitForMicrotasks();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("/api/illustrate");
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.topic).toBe("sparse retrieval — architecture overview");
+    expect(body.pdfExcerpt).toContain("sparse retrieval");
+    // Speculative pre-generation must stay invisible: no canvas item until a
+    // real visualize call happens.
+    expect(useScholarStore.getState().canvasItems).toHaveLength(0);
+  });
+
+  it("does not throw when the illustrate request fails", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new Error("network down"));
+    expect(() => dispatchSpeculativeVisual("paper.pdf", "text", fetchImpl)).not.toThrow();
+    await waitForMicrotasks();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -158,7 +219,9 @@ describe("regenerateAfterRenderFailure", () => {
       kind: "diagram" as const,
       diagram: { mermaid: "flowchart LR\n  A[Tokenizer] --> B[Model]" },
     };
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ ok: true, visual: fixed }));
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ok: true, visual: fixed }));
     vi.stubGlobal("fetch", fetchImpl);
 
     regenerateAfterRenderFailure("vis-1", "Parse error on line 2");
@@ -218,7 +281,9 @@ describe("distillSessionLessons", () => {
     useScholarStore.setState({ lessons: ["a lesson"], distilledLessonCount: 0 });
     const fetchImpl = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(Response.json({ ok: false, error: "R2 skills bucket not configured" }, { status: 503 }));
+      .mockResolvedValue(
+        Response.json({ ok: false, error: "R2 skills bucket not configured" }, { status: 503 }),
+      );
 
     await distillSessionLessons(fetchImpl);
 
