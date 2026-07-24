@@ -38,7 +38,6 @@ export const VisualSchema = z.object({
 
 export type Visual = z.infer<typeof VisualSchema>;
 
-
 const MERMAID_HEADERS = [
   "graph",
   "flowchart",
@@ -71,7 +70,8 @@ export function validateMermaid(src: string): { ok: true } | { ok: false; reason
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith("%%"));
-  if (lines.length < 2) return { ok: false, reason: "needs a header line plus at least one body line" };
+  if (lines.length < 2)
+    return { ok: false, reason: "needs a header line plus at least one body line" };
   const first = lines[0];
   const header = MERMAID_HEADERS.find(
     (h) => first === h || first.startsWith(`${h} `) || first.startsWith(`${h}\t`),
@@ -94,7 +94,9 @@ export function validateMermaid(src: string): { ok: true } | { ok: false; reason
   // (tests/e2e/mermaid-corpus.spec.ts) — without this, valid ER diagrams like
   // "PAPER ||--o{ CITATION : references" were rejected as "unbalanced {}".
   const countableLines =
-    header === "erDiagram" ? bodyLines.map((l) => (l.includes("--") ? l.replace(/[{}]/g, "") : l)) : bodyLines;
+    header === "erDiagram"
+      ? bodyLines.map((l) => (l.includes("--") ? l.replace(/[{}]/g, "") : l))
+      : bodyLines;
   const countSrc = [first, ...countableLines].join("\n");
   const pairs: Array<[string, string]> = [
     ["[", "]"],
@@ -104,7 +106,8 @@ export function validateMermaid(src: string): { ok: true } | { ok: false; reason
   for (const [open, close] of pairs) {
     const o = (countSrc.match(new RegExp(`\\${open}`, "g")) ?? []).length;
     const c = (countSrc.match(new RegExp(`\\${close}`, "g")) ?? []).length;
-    if (o !== c) return { ok: false, reason: `unbalanced ${open}${close} in mermaid source (${o} vs ${c})` };
+    if (o !== c)
+      return { ok: false, reason: `unbalanced ${open}${close} in mermaid source (${o} vs ${c})` };
   }
 
   // NOTE: we used to hard-reject a ':' inside a bracketed label ("A[Step:
@@ -167,13 +170,22 @@ export function validateAxisLabel(
 ): { ok: true } | { ok: false; reason: string } {
   const trimmed = (label ?? "").trim();
   if (!trimmed) {
-    return { ok: false, reason: `${axis}Label is empty — provide a descriptive axis label, ideally with units` };
+    return {
+      ok: false,
+      reason: `${axis}Label is empty — provide a descriptive axis label, ideally with units`,
+    };
   }
   if (trimmed.length < 4) {
-    return { ok: false, reason: `${axis}Label "${trimmed}" is too short to be a descriptive axis label` };
+    return {
+      ok: false,
+      reason: `${axis}Label "${trimmed}" is too short to be a descriptive axis label`,
+    };
   }
   if (GENERIC_AXIS_LABEL_RE.test(trimmed)) {
-    return { ok: false, reason: `${axis}Label "${trimmed}" is a generic placeholder, not a descriptive label` };
+    return {
+      ok: false,
+      reason: `${axis}Label "${trimmed}" is a generic placeholder, not a descriptive label`,
+    };
   }
   const wordCount = trimmed.split(/\s+/).length;
   if (wordCount < 2 && !AXIS_UNIT_HINT_RE.test(trimmed)) {
@@ -185,10 +197,14 @@ export function validateAxisLabel(
   return { ok: true };
 }
 
-export function validateAxisLabels(chart: {
-  xLabel?: string;
-  yLabel?: string;
-} | undefined): { ok: true } | { ok: false; reason: string } {
+export function validateAxisLabels(
+  chart:
+    | {
+        xLabel?: string;
+        yLabel?: string;
+      }
+    | undefined,
+): { ok: true } | { ok: false; reason: string } {
   const x = validateAxisLabel(chart?.xLabel, "x");
   if (!x.ok) return x;
   const y = validateAxisLabel(chart?.yLabel, "y");
@@ -202,7 +218,11 @@ function sanitizeMermaid(src: string) {
     .replace(/\(\(([^)\n]*?):\s*([^)]*?)\)\)/g, "(($1 - $2))");
   // Mindmaps cannot contain flowchart arrows; convert "a --> b" to a parent/child
   // pair so we at least produce parseable output instead of a lexer error.
-  const firstLine = out.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  const firstLine =
+    out
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? "";
   if (/^mindmap\b/.test(firstLine)) {
     out = out
       .split("\n")
@@ -221,7 +241,8 @@ function sanitizeMermaid(src: string) {
 
 export function validateVisual(v: Visual): { ok: true } | { ok: false; reason: string } {
   const spec = (v as unknown as Record<string, unknown>)[v.kind];
-  if (spec == null) return { ok: false, reason: `kind="${v.kind}" but the matching "${v.kind}" field is missing` };
+  if (spec == null)
+    return { ok: false, reason: `kind="${v.kind}" but the matching "${v.kind}" field is missing` };
   if (v.kind === "diagram" && v.diagram) {
     const m = validateMermaid(v.diagram.mermaid);
     if (!m.ok) return { ok: false, reason: `invalid mermaid: ${m.reason}` };
@@ -392,9 +413,12 @@ export interface IllustrateResult {
   warnings: string[];
 }
 
-const HEDGE_RE = /\b(does not (provide|contain|include|describe|specify|mention)|not (enough|sufficient) (information|detail|context)|no (explicit|specific) (equations?|formulas?|diagrams?|details?|information)|the (paper|text|excerpt|document) (does not|doesn't|lacks)|insufficient (information|detail|context)|within the provided text|in the provided (text|excerpt))\b/i;
-const META_NARRATION_RE = /^\s*(diagram|chart|table|math|formula|equation|illustration|figure|visualization)\s*:/i;
-const PROMPT_LIKE_VISUAL_TEXT_RE = /^\s*(a\s+)?(chart|table|diagram|graph|math derivation|callout)\s+(comparing|summarizing|showing|illustrating|describing)\b|\bsummarizing the\b/i;
+const HEDGE_RE =
+  /\b(does not (provide|contain|include|describe|specify|mention)|not (enough|sufficient) (information|detail|context)|no (explicit|specific) (equations?|formulas?|diagrams?|details?|information)|the (paper|text|excerpt|document) (does not|doesn't|lacks)|insufficient (information|detail|context)|within the provided text|in the provided (text|excerpt))\b/i;
+const META_NARRATION_RE =
+  /^\s*(diagram|chart|table|math|formula|equation|illustration|figure|visualization)\s*:/i;
+const PROMPT_LIKE_VISUAL_TEXT_RE =
+  /^\s*(a\s+)?(chart|table|diagram|graph|math derivation|callout)\s+(comparing|summarizing|showing|illustrating|describing)\b|\bsummarizing the\b/i;
 
 export function containsHedgeLanguage(text: string | undefined | null): boolean {
   if (!text) return false;
@@ -412,7 +436,9 @@ export function isPromptLikeVisualText(text: string | undefined | null): boolean
  * (axis labels, hedging, prompt-echoing) all return a precise reason string,
  * which flows straight into the "PREVIOUS ATTEMPT FAILED" retry correction.
  */
-export function runContentValidations(visual: Visual): { ok: true } | { ok: false; reason: string } {
+export function runContentValidations(
+  visual: Visual,
+): { ok: true } | { ok: false; reason: string } {
   const structural = validateVisual(visual);
   if (!structural.ok) return structural;
 
@@ -421,7 +447,9 @@ export function runContentValidations(visual: Visual): { ok: true } | { ok: fals
     if (!axisCheck.ok) return axisCheck;
   }
 
-  const hedgeSource = [visual.narration, visual.callout?.body].find((t) => containsHedgeLanguage(t));
+  const hedgeSource = [visual.narration, visual.callout?.body].find((t) =>
+    containsHedgeLanguage(t),
+  );
   if (hedgeSource) {
     return {
       ok: false,
@@ -429,7 +457,9 @@ export function runContentValidations(visual: Visual): { ok: true } | { ok: fals
     };
   }
 
-  const promptLikeSource = [visual.narration, visual.callout?.body].find((t) => isPromptLikeVisualText(t));
+  const promptLikeSource = [visual.narration, visual.callout?.body].find((t) =>
+    isPromptLikeVisualText(t),
+  );
   if (promptLikeSource) {
     return {
       ok: false,
@@ -441,10 +471,16 @@ export function runContentValidations(visual: Visual): { ok: true } | { ok: fals
 }
 
 const KIND_KEYWORDS: Array<{ kind: Visual["kind"]; re: RegExp }> = [
-  { kind: "math", re: /\b(math|mathematic\w*|equation|formula|formalism|derivation|loss function|theorem|proof|complexity bound)\b/i },
+  {
+    kind: "math",
+    re: /\b(math|mathematic\w*|equation|formula|formalism|derivation|loss function|theorem|proof|complexity bound)\b/i,
+  },
   { kind: "table", re: /\b(table|matrix|comparison table)\b/i },
   { kind: "chart", re: /\b(chart|plot|trend|line chart|bar chart|scatter|histogram|curve)\b/i },
-  { kind: "diagram", re: /\b(diagram|flowchart|flow chart|architecture|pipeline|topology|mindmap|sequence diagram|state machine|tree structure|expander graph|fat tree)\b/i },
+  {
+    kind: "diagram",
+    re: /\b(diagram|flowchart|flow chart|architecture|pipeline|topology|mindmap|sequence diagram|state machine|tree structure|expander graph|fat tree)\b/i,
+  },
 ];
 
 export function detectRequestedKind(input: IllustrateInput): Visual["kind"] | null {
@@ -468,7 +504,9 @@ export function detectRequestedKind(input: IllustrateInput): Visual["kind"] | nu
 
 export function isBillingOrCreditError(err: unknown) {
   const msg = err instanceof Error ? err.message : String(err);
-  return /\b402\b|payment required|billing|credits? exhausted|insufficient credits|add credits/i.test(msg);
+  return /\b402\b|payment required|billing|credits? exhausted|insufficient credits|add credits/i.test(
+    msg,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +566,10 @@ const STRICT_KIND_SCHEMAS: Record<StrictKind, Record<string, unknown>> = {
     properties: {
       title: { type: "string" },
       narration: { type: "string" },
-      inline: { type: "string", description: "Optional one-line plain English summary; empty string is OK" },
+      inline: {
+        type: "string",
+        description: "Optional one-line plain English summary; empty string is OK",
+      },
       steps: {
         type: "array",
         items: { type: "string" },
@@ -544,8 +585,16 @@ const STRICT_KIND_SCHEMAS: Record<StrictKind, Record<string, unknown>> = {
       title: { type: "string" },
       narration: { type: "string" },
       chartType: { type: "string", enum: ["line", "bar", "area", "scatter"] },
-      xLabel: { type: "string", description: "REQUIRED non-empty descriptive x-axis label, ideally with units, e.g. 'Sequence length (tokens)'. NEVER empty, NEVER 'X' or 'value'." },
-      yLabel: { type: "string", description: "REQUIRED non-empty descriptive y-axis label, ideally with units, e.g. 'Latency (ms)'. NEVER empty, NEVER 'Y' or 'value'." },
+      xLabel: {
+        type: "string",
+        description:
+          "REQUIRED non-empty descriptive x-axis label, ideally with units, e.g. 'Sequence length (tokens)'. NEVER empty, NEVER 'X' or 'value'.",
+      },
+      yLabel: {
+        type: "string",
+        description:
+          "REQUIRED non-empty descriptive y-axis label, ideally with units, e.g. 'Latency (ms)'. NEVER empty, NEVER 'Y' or 'value'.",
+      },
       series: {
         type: "array",
         description: "One entry per data series",
@@ -698,8 +747,10 @@ export function pickStrictKind(input: IllustrateInput): StrictKind {
   const requested = detectRequestedKind(input);
   if (requested && requested !== "callout") return requested;
   const text = `${input.topic ?? ""} ${input.hint ?? ""}`;
-  if (/\b(compare|comparison|versus|vs\.?|baseline|trade-?off|matrix)\b/i.test(text)) return "table";
-  if (/\b(architecture|pipeline|flow|process|component|tree|graph|topology|mindmap)\b/i.test(text)) return "diagram";
+  if (/\b(compare|comparison|versus|vs\.?|baseline|trade-?off|matrix)\b/i.test(text))
+    return "table";
+  if (/\b(architecture|pipeline|flow|process|component|tree|graph|topology|mindmap)\b/i.test(text))
+    return "diagram";
   if (/\b(equation|formula|derivation|theorem|complexity)\b/i.test(text)) return "math";
   if (/\b(trend|plot|chart|curve|histogram)\b/i.test(text)) return "chart";
   return "diagram";
@@ -764,7 +815,6 @@ export async function generateVisualGroqStrict(
     max_tokens: 8192,
   };
 
-
   const res = await fetchImpl(`${GROQ_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -775,7 +825,9 @@ export async function generateVisualGroqStrict(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Groq strict call failed: ${res.status} ${res.statusText} ${text.slice(0, 400)}`);
+    throw new Error(
+      `Groq strict call failed: ${res.status} ${res.statusText} ${text.slice(0, 400)}`,
+    );
   }
   const json = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -791,6 +843,53 @@ export async function generateVisualGroqStrict(
     );
   }
   return strictPayloadToVisual(kind, payload);
+}
+
+const TEASER_SYSTEM_PROMPT = `You write one short teaser sentence (under 14 words) previewing a visual that's about to be generated for a live voice-tutoring session. Describe concretely what the viewer is about to see (e.g. "A flowchart of the three-stage retrieval pipeline"). No quotes, no trailing filler like "Generating..." or "Loading...", just the preview itself.`;
+
+/**
+ * Fast, best-effort one-liner previewing a visual before the real
+ * (slower, structured) generation finishes — see Phase 5d's two-phase
+ * reveal in agent-tools.ts. Uses Groq's fastest model with no retries and
+ * no structured-output constraints: any failure here should never block or
+ * delay the real visual, so callers are expected to swallow errors.
+ */
+export async function generateVisualTeaser(
+  input: { topic: string; hint?: string },
+  opts: { apiKey: string; model?: string; fetchImpl?: FetchLike },
+): Promise<string> {
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch.bind(globalThis) as FetchLike);
+  const model = opts.model ?? GROQ_MODELS.fast;
+
+  const res = await fetchImpl(`${GROQ_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${opts.apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: TEASER_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `Topic: ${input.topic}${input.hint ? `\nHint: ${input.hint}` : ""}`,
+        },
+      ],
+      temperature: 0.4,
+      max_tokens: 40,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Groq teaser call failed: ${res.status} ${res.statusText} ${text.slice(0, 200)}`,
+    );
+  }
+  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const content = (json.choices?.[0]?.message?.content ?? "").trim().replace(/^"|"$/g, "");
+  if (!content) throw new Error("Groq teaser call returned empty content");
+  return content.slice(0, 200);
 }
 
 // Fast open-weights model on Workers AI with JSON-schema support — the
@@ -875,7 +974,9 @@ function toGeminiSchema(schema: Record<string, unknown>): Record<string, unknown
     const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
     const out: Record<string, unknown> = {
       type: Type.OBJECT,
-      properties: Object.fromEntries(Object.entries(properties).map(([k, v]) => [k, toGeminiSchema(v)])),
+      properties: Object.fromEntries(
+        Object.entries(properties).map(([k, v]) => [k, toGeminiSchema(v)]),
+      ),
     };
     if (Array.isArray(schema.required)) out.required = schema.required;
     return out;
@@ -1022,7 +1123,8 @@ export async function generateVisual(
           fetchImpl: opts.fetchImpl,
           recentBlock: sharedRecentBlock,
           correction,
-          temperature: GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)],
+          temperature:
+            GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)],
         }),
     });
   }
@@ -1085,7 +1187,9 @@ export async function generateVisual(
         const msg = err instanceof Error ? err.message : String(err);
         if (isBillingOrCreditError(err) || isRateLimitError(err)) {
           lastErrorWasUnavailable = true;
-          warnings.push(`${provider.label}: unavailable (${msg}) — failing over to the next provider`);
+          warnings.push(
+            `${provider.label}: unavailable (${msg}) — failing over to the next provider`,
+          );
           lastError = ""; // fresh start for the next provider; this wasn't a content problem to "fix"
           break;
         }

@@ -166,6 +166,52 @@ export async function fetchIllustration(
   );
 }
 
+interface TeaserApiResponse {
+  ok?: boolean;
+  error?: string;
+  teaser?: string;
+}
+
+async function fetchVisualTeaser(
+  payload: { topic: string; hint?: string },
+  fetchImpl: typeof fetch = fetch,
+) {
+  return postJsonWithRetry<TeaserApiResponse>(
+    "/api/illustrate-teaser",
+    payload,
+    "Teaser service",
+    fetchImpl,
+    {
+      attempts: 1,
+    },
+  );
+}
+
+/**
+ * Two-phase reveal (Phase 5d): while the real (slower, structured) visual
+ * generates, patch the pending canvas card with a fast one-line preview from
+ * Groq's smallest model, so the user sees something concrete within ~1s
+ * instead of a bare spinner for the several seconds the full generation
+ * takes. Best-effort and silent on failure — the real generation's own
+ * narration overwrites this regardless, so a missing teaser just means the
+ * spinner shows a beat longer.
+ */
+function dispatchVisualTeaser(id: string, params: IllustrateParams) {
+  void (async () => {
+    try {
+      const json = await fetchVisualTeaser({ topic: params.topic, hint: params.hint });
+      if (
+        json.teaser &&
+        useScholarStore.getState().canvasItems.find((c) => c.id === id)?.status === "pending"
+      ) {
+        useScholarStore.getState().patchCanvas(id, { narration: json.teaser });
+      }
+    } catch {
+      // Silent — see doc comment above.
+    }
+  })();
+}
+
 export function deliverContextualUpdate(host: ToolHost, text: string) {
   if (host.canSendContextualUpdate && !host.canSendContextualUpdate()) {
     host.queueContextualUpdate?.(text);
@@ -361,6 +407,7 @@ export function buildClientTools(host: ToolHost) {
         request: { topic: params.topic, hint: params.hint },
       };
       store().upsertCanvas(item);
+      dispatchVisualTeaser(id, params);
 
       // Fire-and-forget — DO NOT await; tool returns immediately.
       void (async () => {

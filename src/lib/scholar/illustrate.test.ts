@@ -3,6 +3,7 @@ import {
   containsHedgeLanguage,
   detectRequestedKind,
   generateVisual,
+  generateVisualTeaser,
   isPromptLikeVisualText,
   validateAxisLabel,
   validateMermaid,
@@ -153,9 +154,41 @@ describe("validateVisual", () => {
     };
     expect(validateVisual(v)).toEqual({ ok: true });
   });
-
 });
 
+describe("generateVisualTeaser", () => {
+  it("returns the trimmed, unquoted teaser text from Groq's fast model", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      expect(url).toBe("https://api.groq.com/openai/v1/chat/completions");
+      expect(body.model).toBe("llama-3.1-8b-instant");
+      return Response.json({
+        choices: [{ message: { content: '"A flowchart of the retrieval pipeline."' } }],
+      });
+    });
+
+    const teaser = await generateVisualTeaser(
+      { topic: "Retrieval pipeline", hint: "diagram" },
+      { apiKey: "groq-token", fetchImpl },
+    );
+
+    expect(teaser).toBe("A flowchart of the retrieval pipeline.");
+  });
+
+  it("throws on a non-OK response instead of returning a placeholder", async () => {
+    const fetchImpl = vi.fn(async () => new Response("rate limited", { status: 429 }));
+    await expect(
+      generateVisualTeaser({ topic: "Anything" }, { apiKey: "groq-token", fetchImpl }),
+    ).rejects.toThrow(/Groq teaser call failed: 429/);
+  });
+
+  it("throws on empty content instead of returning a blank teaser", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ choices: [{ message: { content: "" } }] }));
+    await expect(
+      generateVisualTeaser({ topic: "Anything" }, { apiKey: "groq-token", fetchImpl }),
+    ).rejects.toThrow(/empty content/);
+  });
+});
 
 describe("generateVisual — provider errors", () => {
   it("throws a visible Payment Required error instead of fabricating a stub", async () => {
@@ -248,7 +281,8 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
       capturedRequests.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
       const payload = {
         title: "RNG topology",
-        narration: "The graph contrasts hierarchical fat-tree links with flat expander connectivity.",
+        narration:
+          "The graph contrasts hierarchical fat-tree links with flat expander connectivity.",
         mermaid: "flowchart LR\n  A[Fat tree] --> B[Core]\n  C[Expander] --> D[Many cuts]",
       };
       return new Response(
@@ -272,7 +306,10 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
     expect(capturedRequests[0].url).toBe("https://api.groq.com/openai/v1/chat/completions");
     const body = capturedRequests[0].body as {
       model: string;
-      response_format: { type: string; json_schema: { strict: boolean; schema: { additionalProperties: boolean } } };
+      response_format: {
+        type: string;
+        json_schema: { strict: boolean; schema: { additionalProperties: boolean } };
+      };
     };
     expect(body.model).toBe("openai/gpt-oss-20b");
     expect(body.response_format.type).toBe("json_schema");
@@ -356,18 +393,21 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
     expect(result.visual.kind).toBe("diagram");
     // Second attempt's user message must carry the specific failure reason
     // from the first attempt, and temperature must escalate downward.
-    const secondBody = capturedBodies[1] as { temperature: number; messages: Array<{ content: string }> };
+    const secondBody = capturedBodies[1] as {
+      temperature: number;
+      messages: Array<{ content: string }>;
+    };
     expect(secondBody.temperature).toBeLessThan(0.5);
-    const userMessage = secondBody.messages.find((m) => m.content.includes("Topic:"))?.content ?? "";
+    const userMessage =
+      secondBody.messages.find((m) => m.content.includes("Topic:"))?.content ?? "";
     expect(userMessage).toMatch(/PREVIOUS ATTEMPT FAILED/);
   });
-
-
 
   it("retries when the model returns hedge language in the narration", async () => {
     const hedged = {
       title: "Mathematical Formalism",
-      narration: "The paper does not provide explicit mathematical equations within the provided text.",
+      narration:
+        "The paper does not provide explicit mathematical equations within the provided text.",
       inline: "",
       steps: ["h(G) = \\min \\frac{|E(S, \\bar S)|}{|S|}"],
     };
@@ -375,7 +415,10 @@ describe("generateVisual — kind enforcement, recentVisuals, research-triggerin
       title: "Edge Expansion (Math)",
       narration: "Edge expansion h(G) is the minimum boundary-to-volume ratio over small cuts.",
       inline: "",
-      steps: ["h(G) = \\min_{|S| \\le |V|/2} \\frac{|E(S, \\bar S)|}{|S|}", "\\lambda_2(G) \\le 2 h(G)"],
+      steps: [
+        "h(G) = \\min_{|S| \\le |V|/2} \\frac{|E(S, \\bar S)|}{|S|}",
+        "\\lambda_2(G) \\le 2 h(G)",
+      ],
     };
     const { fetchImpl, captured } = groqFetchMock([hedged, real]);
 
@@ -504,7 +547,8 @@ describe("generateVisual — provider failover (Groq -> Workers AI -> Gemini)", 
 
   it("fails over from Groq to Workers AI when Groq is rate-limited, without retrying Groq", async () => {
     const groqFetch = vi.fn(
-      async () => new Response("rate limit exceeded", { status: 429, statusText: "Too Many Requests" }),
+      async () =>
+        new Response("rate limit exceeded", { status: 429, statusText: "Too Many Requests" }),
     );
     const workersAiRun = vi.fn(async () => ({ response: JSON.stringify(validDiagramPayload) }));
 
@@ -521,7 +565,9 @@ describe("generateVisual — provider failover (Groq -> Workers AI -> Gemini)", 
     expect(workersAiRun).toHaveBeenCalledTimes(1);
     expect(result.visual.kind).toBe("diagram");
     expect(result.attempts).toBe(1);
-    expect(result.warnings.some((w) => /Groq strict mode.*unavailable.*failing over/i.test(w))).toBe(true);
+    expect(
+      result.warnings.some((w) => /Groq strict mode.*unavailable.*failing over/i.test(w)),
+    ).toBe(true);
   });
 
   it("fails over from Groq through Workers AI to Gemini when both are unavailable", async () => {
@@ -529,12 +575,18 @@ describe("generateVisual — provider failover (Groq -> Workers AI -> Gemini)", 
     const workersAiRun = vi.fn(async () => {
       throw new Error("429 rate limited");
     });
-    const geminiGenerateContent = vi.fn(async () => ({ text: JSON.stringify(validDiagramPayload) }));
+    const geminiGenerateContent = vi.fn(async () => ({
+      text: JSON.stringify(validDiagramPayload),
+    }));
 
     const result = await generateVisual(
       { topic: "Inference pipeline", hint: "diagram" },
       {
-        env: { groqApiKey: "groq-token", workersAi: { run: workersAiRun }, geminiApiKey: "gemini-key" },
+        env: {
+          groqApiKey: "groq-token",
+          workersAi: { run: workersAiRun },
+          geminiApiKey: "gemini-key",
+        },
         maxAttempts: 2,
         fetchImpl: groqFetch,
         generateContentImpl: geminiGenerateContent,
@@ -560,7 +612,11 @@ describe("generateVisual — provider failover (Groq -> Workers AI -> Gemini)", 
       generateVisual(
         { topic: "Inference pipeline", hint: "diagram" },
         {
-          env: { groqApiKey: "groq-token", workersAi: { run: workersAiRun }, geminiApiKey: "gemini-key" },
+          env: {
+            groqApiKey: "groq-token",
+            workersAi: { run: workersAiRun },
+            geminiApiKey: "gemini-key",
+          },
           maxAttempts: 2,
           fetchImpl: groqFetch,
           generateContentImpl: geminiGenerateContent,
@@ -582,10 +638,13 @@ describe("generateVisual — provider failover (Groq -> Workers AI -> Gemini)", 
     const groqFetch = vi.fn(async () => {
       const payload = badThenGood[Math.min(call, badThenGood.length - 1)];
       call += 1;
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     });
     const workersAiRun = vi.fn(async () => ({ response: JSON.stringify(validDiagramPayload) }));
 

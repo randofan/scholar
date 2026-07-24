@@ -191,6 +191,95 @@ describe("dispatchSpeculativeVisual", () => {
   });
 });
 
+describe("visualize — two-phase teaser reveal", () => {
+  it("patches the pending canvas item's narration with a fast teaser before the full visual arrives", async () => {
+    let resolveIllustrate: (value: Response) => void = () => {};
+    const illustratePromise = new Promise<Response>((resolve) => {
+      resolveIllustrate = resolve;
+    });
+    const fetchImpl = vi.fn<typeof fetch>((url) => {
+      if (String(url) === "/api/illustrate-teaser") {
+        return Promise.resolve(Response.json({ ok: true, teaser: "A diagram of the pipeline." }));
+      }
+      return illustratePromise;
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "Retrieval pipeline", hint: "diagram" });
+    await waitForMicrotasks();
+
+    const pending = useScholarStore.getState().canvasItems[0];
+    expect(pending.status).toBe("pending");
+    expect(pending.narration).toBe("A diagram of the pipeline.");
+
+    resolveIllustrate(
+      Response.json({
+        ok: true,
+        visual: {
+          title: "Retrieval pipeline",
+          narration: "Full narration",
+          kind: "diagram",
+          diagram: { mermaid: "flowchart LR\n  A --> B" },
+        },
+      }),
+    );
+    await waitForMicrotasks();
+
+    const ready = useScholarStore.getState().canvasItems[0];
+    expect(ready.status).toBe("ready");
+    expect(ready.narration).toBe("Full narration");
+  });
+
+  it("never overwrites an already-resolved slide if the teaser resolves late", async () => {
+    let resolveTeaser: (value: Response) => void = () => {};
+    const teaserPromise = new Promise<Response>((resolve) => {
+      resolveTeaser = resolve;
+    });
+    const fetchImpl = vi.fn<typeof fetch>((url) => {
+      if (String(url) === "/api/illustrate-teaser") return teaserPromise;
+      return Promise.resolve(
+        Response.json({
+          ok: true,
+          visual: {
+            title: "T",
+            narration: "Full narration",
+            kind: "diagram",
+            diagram: { mermaid: "flowchart LR\n  A --> B" },
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "T" });
+    await waitForMicrotasks();
+    expect(useScholarStore.getState().canvasItems[0].status).toBe("ready");
+
+    resolveTeaser(Response.json({ ok: true, teaser: "Stale teaser" }));
+    await waitForMicrotasks();
+
+    expect(useScholarStore.getState().canvasItems[0].narration).toBe("Full narration");
+  });
+
+  it("leaves the caller-supplied hint as the narration when the teaser request fails", async () => {
+    const fetchImpl = vi.fn<typeof fetch>((url) => {
+      if (String(url) === "/api/illustrate-teaser") return Promise.reject(new Error("teaser down"));
+      return new Promise(() => {}); // main generation never resolves in this test
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "T", hint: "diagram: pipeline" });
+    await waitForMicrotasks();
+
+    const item = useScholarStore.getState().canvasItems[0];
+    expect(item.status).toBe("pending");
+    expect(item.narration).toBe("diagram: pipeline");
+  });
+});
+
 describe("regenerateAfterRenderFailure", () => {
   const failingMermaid = "flowchart LR\n  A[Tokenizer] --> B[Model";
 
