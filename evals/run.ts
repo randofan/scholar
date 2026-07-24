@@ -11,6 +11,13 @@
 //   bun evals/run.ts --live --record    # live run that (re)writes cassettes
 //   bun evals/run.ts --check            # replay + compare against baseline, exit 1 on regression
 //   bun evals/run.ts --case=attention-diagram  # run a single case by id
+//   bun evals/run.ts --distill          # also distill failure reasons into evals/skill-store/
+//
+// --distill closes the loop between "the eval harness catches a regression"
+// and "the system learns not to repeat it": every visualize case already
+// loads the rules accumulated in evals/skill-store/ (a committed, file-backed
+// stand-in for the real R2 skill file — see file-bucket.ts) so a lesson
+// learned once keeps getting fed back into every later run, live or replay.
 
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -22,8 +29,10 @@ import {
   replayingFetch,
   type Cassette,
 } from "./cassette";
+import { createFileBucket } from "./file-bucket";
 import { generateVisual } from "../src/lib/scholar/illustrate.server";
 import { generateResearch, type GeminiGenerateContent } from "../src/lib/scholar/research.server";
+import { distillLessonsIntoSkill, loadSkillRules } from "../src/lib/scholar/skills.server";
 import { scoreResearch, scoreVisual } from "./scoring";
 
 const EVALS_DIR = import.meta.dirname;
@@ -31,6 +40,7 @@ const CASSETTE_DIR = path.join(EVALS_DIR, "cassettes");
 const CASES_PATH = path.join(EVALS_DIR, "cases.json");
 const REPORT_PATH = path.join(EVALS_DIR, "report.json");
 const BASELINE_PATH = path.join(EVALS_DIR, "baseline.json");
+const SKILL_STORE_DIR = path.join(EVALS_DIR, "skill-store");
 
 interface VisualizeCase {
   id: string;
@@ -83,6 +93,7 @@ const budgetArg = args.find((a) => a.startsWith("--budget="));
 const budget = budgetArg ? Number(budgetArg.split("=")[1]) : 30;
 const caseFilterArg = args.find((a) => a.startsWith("--case="));
 const caseFilter = caseFilterArg ? caseFilterArg.split("=")[1] : undefined;
+const isDistill = args.includes("--distill");
 
 if (isRecord && !isLive) {
   console.error("--record requires --live (nothing to record from replay mode)");
@@ -100,12 +111,12 @@ function checkBudget() {
   }
 }
 
-async function runVisualizeCase(c: VisualizeCase): Promise<CaseResult> {
+async function runVisualizeCase(c: VisualizeCase, skillRules: string[]): Promise<CaseResult> {
   const cassette = await loadCassette(CASSETTE_DIR, c.id);
   let fetchImpl;
   if (isLive) {
     checkBudget();
-    const real = (globalThis.fetch.bind(globalThis)) as typeof fetch;
+    const real = globalThis.fetch.bind(globalThis) as typeof fetch;
     const counted = (async (...fetchArgs: Parameters<typeof fetch>) => {
       checkBudget();
       callsMade += 1;
@@ -129,7 +140,7 @@ async function runVisualizeCase(c: VisualizeCase): Promise<CaseResult> {
   const start = Date.now();
   try {
     const result = await generateVisual(
-      { topic: c.topic, hint: c.hint, pdfExcerpt: c.pdfExcerpt },
+      { topic: c.topic, hint: c.hint, pdfExcerpt: c.pdfExcerpt, skillRules },
       { env: { groqApiKey: process.env.GROQ_API_KEY ?? "cassette-key" }, fetchImpl },
     );
     const latencyMs = Date.now() - start;
@@ -146,7 +157,14 @@ async function runVisualizeCase(c: VisualizeCase): Promise<CaseResult> {
     };
   } catch (err) {
     if (err instanceof BudgetExceededError) {
-      return { id: c.id, type: "visualize", pass: false, skipped: err.message, checks: {}, reasons: [] };
+      return {
+        id: c.id,
+        type: "visualize",
+        pass: false,
+        skipped: err.message,
+        checks: {},
+        reasons: [],
+      };
     }
     return {
       id: c.id,
@@ -167,7 +185,14 @@ async function runResearchCase(c: ResearchCase): Promise<CaseResult> {
     checkBudget();
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return { id: c.id, type: "research", pass: false, skipped: "GEMINI_API_KEY not set", checks: {}, reasons: [] };
+      return {
+        id: c.id,
+        type: "research",
+        pass: false,
+        skipped: "GEMINI_API_KEY not set",
+        checks: {},
+        reasons: [],
+      };
     }
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey });
@@ -199,10 +224,25 @@ async function runResearchCase(c: ResearchCase): Promise<CaseResult> {
     );
     const latencyMs = Date.now() - start;
     const { checks, reasons, pass } = scoreResearch(result.result);
-    return { id: c.id, type: "research", pass, attempts: result.attempts, latencyMs, checks, reasons };
+    return {
+      id: c.id,
+      type: "research",
+      pass,
+      attempts: result.attempts,
+      latencyMs,
+      checks,
+      reasons,
+    };
   } catch (err) {
     if (err instanceof BudgetExceededError) {
-      return { id: c.id, type: "research", pass: false, skipped: err.message, checks: {}, reasons: [] };
+      return {
+        id: c.id,
+        type: "research",
+        pass: false,
+        skipped: err.message,
+        checks: {},
+        reasons: [],
+      };
     }
     return {
       id: c.id,
@@ -219,6 +259,12 @@ async function runResearchCase(c: ResearchCase): Promise<CaseResult> {
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
+  const skillBucket = createFileBucket(SKILL_STORE_DIR);
+  const skillRules = await loadSkillRules(skillBucket);
+  if (skillRules.length > 0) {
+    console.log(`Loaded ${skillRules.length} learned rule(s) from ${SKILL_STORE_DIR}`);
+  }
+
   const cases = JSON.parse(await readFile(CASES_PATH, "utf-8")) as EvalCase[];
   const selected = caseFilter ? cases.filter((c) => c.id === caseFilter) : cases;
   if (selected.length === 0) {
@@ -229,10 +275,18 @@ async function main() {
   const results: CaseResult[] = [];
   for (const c of selected) {
     if (isLive && callsMade >= budget) {
-      results.push({ id: c.id, type: c.type, pass: false, skipped: `live call budget (${budget}) exhausted`, checks: {}, reasons: [] });
+      results.push({
+        id: c.id,
+        type: c.type,
+        pass: false,
+        skipped: `live call budget (${budget}) exhausted`,
+        checks: {},
+        reasons: [],
+      });
       continue;
     }
-    const result = c.type === "visualize" ? await runVisualizeCase(c) : await runResearchCase(c);
+    const result =
+      c.type === "visualize" ? await runVisualizeCase(c, skillRules) : await runResearchCase(c);
     results.push(result);
     const statusIcon = result.skipped ? "○" : result.pass ? "✓" : "✗";
     console.log(
@@ -269,12 +323,31 @@ async function main() {
     `${passed}/${scored.length} passed (${(report.passRate * 100).toFixed(0)}%), ${skippedCount} skipped, avg ${report.avgAttempts.toFixed(2)} attempts, avg ${report.avgLatencyMs.toFixed(0)}ms`,
   );
 
+  if (isDistill) {
+    // No Workers AI binding here — falls back to the deterministic merge
+    // (dedupe + cap), which is exactly what a local/CI run should do: no
+    // network call, no API spend, still useful.
+    const failureReasons = results
+      .filter((r) => r.type === "visualize" && !r.pass && !r.skipped)
+      .flatMap((r) => r.reasons);
+    if (failureReasons.length > 0) {
+      const rules = await distillLessonsIntoSkill(skillBucket, undefined, failureReasons);
+      console.log(
+        `Distilled ${failureReasons.length} failure reason(s) into ${SKILL_STORE_DIR} (${rules.length} total rule(s)).`,
+      );
+    } else {
+      console.log("--distill: no visualize failures this run — nothing new to distill.");
+    }
+  }
+
   if (isCheck) {
     let baseline: Report | null = null;
     try {
       baseline = JSON.parse(await readFile(BASELINE_PATH, "utf-8"));
     } catch {
-      console.error(`No baseline at ${BASELINE_PATH} — run once and commit evals/baseline.json to enable --check.`);
+      console.error(
+        `No baseline at ${BASELINE_PATH} — run once and commit evals/baseline.json to enable --check.`,
+      );
       process.exit(1);
     }
     if (baseline && report.passRate < baseline.passRate) {
@@ -283,7 +356,9 @@ async function main() {
       );
       process.exit(1);
     }
-    console.log(`OK: pass rate ${(report.passRate * 100).toFixed(0)}% meets baseline ${((baseline?.passRate ?? 0) * 100).toFixed(0)}%`);
+    console.log(
+      `OK: pass rate ${(report.passRate * 100).toFixed(0)}% meets baseline ${((baseline?.passRate ?? 0) * 100).toFixed(0)}%`,
+    );
   }
 }
 
