@@ -12,8 +12,19 @@ const HOST = process.env.PLAYWRIGHT_HOST ?? "127.0.0.1";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  timeout: 30_000,
+  // pdf-parsing.spec.ts overrides this via test.setTimeout() — real pdfjs-dist
+  // parsing latency is highly variable in some sandboxed headless-Chromium
+  // environments (see tests/e2e/helpers/upload-pdf.ts). Every other spec
+  // seeds state directly instead of parsing a real file, so 60s is generous.
+  timeout: 60_000,
   fullyParallel: true,
+  // All specs share ONE `vite dev` instance (see webServer below). Running
+  // workers in parallel means multiple browser contexts hit that single dev
+  // server's cold on-demand module transform concurrently, which serializes
+  // internally anyway and was observed to blow well past a 45s per-test
+  // timeout. One worker avoids the contention; with ~20 total e2e tests here
+  // the wall-clock cost of serial execution is small.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],

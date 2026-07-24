@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { extractPdfText } from "@/lib/scholar/pdf";
 import { useScholarStore } from "@/lib/scholar/store";
 import { buildClientTools, distillSessionLessons, type ToolHost } from "@/lib/scholar/agent-tools";
@@ -28,6 +28,12 @@ function ProductionGuard() {
   return null;
 }
 
+declare global {
+  interface Window {
+    __scholarStore?: typeof useScholarStore;
+  }
+}
+
 interface TranscriptLine {
   id: string;
   role: "user" | "agent" | "tool";
@@ -38,6 +44,16 @@ function DevHarnessPage() {
   const pdf = useScholarStore((s) => s.pdf);
   const setPdf = useScholarStore((s) => s.setPdf);
   const resetStore = useScholarStore((s) => s.reset);
+
+  // Test-only hook: lets Playwright seed store state directly (e.g. `pdf`)
+  // without going through the real upload+parse flow, for tests whose
+  // subject is downstream UI wiring, not pdfjs-dist itself.
+  useEffect(() => {
+    window.__scholarStore = useScholarStore;
+    return () => {
+      delete window.__scholarStore;
+    };
+  }, []);
 
   const [parsing, setParsing] = useState(false);
   const [question, setQuestion] = useState("");
@@ -214,7 +230,10 @@ function DevHarnessPage() {
           <main className="overflow-y-auto min-h-0">
             <CanvasPane />
           </main>
-          <aside className="overflow-y-auto border-l border-border min-h-0">
+          <aside
+            className="overflow-y-auto border-l border-border min-h-0"
+            data-testid="harness-research-feed"
+          >
             <ResearchFeed />
           </aside>
         </div>
