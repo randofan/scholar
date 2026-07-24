@@ -1,6 +1,10 @@
 import "@tanstack/react-start";
 import { createFileRoute } from "@tanstack/react-router";
-import { generateResearch } from "@/lib/scholar/research.server";
+import {
+  buildCitationContext,
+  generateResearch,
+  type CitationCandidate,
+} from "@/lib/scholar/research.server";
 
 const corsHeaders = { "Content-Type": "application/json" };
 
@@ -8,6 +12,8 @@ interface ReqBody {
   query?: string;
   pdfExcerpt?: string;
   scope?: "web" | "citations" | "both";
+  /** Client-side rankReferencesByQuery() picks — see references.ts. Only resolved when scope requests citations. */
+  citationCandidates?: CitationCandidate[];
 }
 
 export const Route = createFileRoute("/api/research")({
@@ -23,22 +29,30 @@ export const Route = createFileRoute("/api/research")({
           });
         }
         try {
+          const wantsCitations = body.scope === "citations" || body.scope === "both" || !body.scope;
+          const candidates = (body.citationCandidates ?? []).slice(0, 5);
+          const citation =
+            wantsCitations && candidates.length > 0
+              ? await buildCitationContext(candidates)
+              : { block: "", resolvedCount: 0 };
+
           const { result, attempts, warnings, toolCalls } = await generateResearch({
             query,
             pdfExcerpt: body.pdfExcerpt,
+            citationContext: citation.block || undefined,
           });
 
           if (warnings.length > 0) {
             console.warn("research retries", warnings);
           }
           console.log(
-            `research ok: attempts=${attempts} toolCalls=${toolCalls} summaryChars=${result.summary.length} keyPoints=${result.keyPoints.length}`,
+            `research ok: attempts=${attempts} toolCalls=${toolCalls} summaryChars=${result.summary.length} keyPoints=${result.keyPoints.length} citationsResolved=${citation.resolvedCount}/${candidates.length}`,
           );
 
-          return new Response(
-            JSON.stringify({ ok: true, ...result, attempts, toolCalls }),
-            { status: 200, headers: corsHeaders },
-          );
+          return new Response(JSON.stringify({ ok: true, ...result, attempts, toolCalls }), {
+            status: 200,
+            headers: corsHeaders,
+          });
         } catch (err) {
           const msg = err instanceof Error ? err.message : "unknown error";
           console.error("research error", msg);

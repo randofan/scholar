@@ -433,4 +433,70 @@ describe("contextual update dispatch ordering", () => {
     expect(sent).not.toHaveBeenCalled();
     expect(queued.join("\n")).toContain("Recovered background research.");
   });
+
+  it("includes ranked citation candidates from the paper's own bibliography for scope 'both' (the default)", async () => {
+    useScholarStore.setState({
+      pdf: {
+        name: "paper.pdf",
+        text: "Paper body about expander graphs for RNG. References [1] A. Author. Random number generation using expander graphs. arXiv:1901.01234 (2019). [2] B. Author. Unrelated congestion control work (2020).",
+        pages: 3,
+        charCount: 64,
+      },
+    });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ok: true, summary: "s", keyPoints: [] }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.research({ query: "expander graphs for random number generation" });
+    await waitForMicrotasks();
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body.citationCandidates).toEqual([{ arxivId: "1901.01234" }]);
+  });
+
+  it("omits citationCandidates for scope 'web' (pure training-knowledge synthesis, no citation lookups)", async () => {
+    useScholarStore.setState({
+      pdf: {
+        name: "paper.pdf",
+        text: "Paper body about expander graphs for RNG. References [1] A. Author. Random number generation using expander graphs. arXiv:1901.01234, 2019.",
+        pages: 3,
+        charCount: 64,
+      },
+    });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ok: true, summary: "s", keyPoints: [] }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.research({ query: "expander graphs for random number generation", scope: "web" });
+    await waitForMicrotasks();
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body.citationCandidates).toBeUndefined();
+  });
+
+  it("omits citationCandidates when nothing in the bibliography matches the query", async () => {
+    useScholarStore.setState({
+      pdf: {
+        name: "paper.pdf",
+        text: "Paper body. References [1] A. Author. Something entirely unrelated to the query, 2020.",
+        pages: 3,
+        charCount: 64,
+      },
+    });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ok: true, summary: "s", keyPoints: [] }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.research({ query: "quantum entanglement in photonic circuits", scope: "citations" });
+    await waitForMicrotasks();
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body.citationCandidates).toBeUndefined();
+  });
 });

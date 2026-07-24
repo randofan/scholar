@@ -1,11 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { z } from "zod";
+import { resolveReference, type FetchLike, type ResolvedPaper } from "./citations.server";
 
 export const ResearchSchema = z.object({
   summary: z
     .string()
     .min(1)
-    .describe("Dense 4-8 sentence briefing for the voice agent. No URLs, no markdown links, no citation markers."),
+    .describe(
+      "Dense 4-8 sentence briefing for the voice agent. No URLs, no markdown links, no citation markers.",
+    ),
   keyPoints: z
     .array(z.string())
     .max(10)
@@ -17,9 +20,7 @@ export type ResearchResult = z.infer<typeof ResearchSchema>;
 
 const LooseResearchSchema = z.object({
   summary: z.string().optional().nullable(),
-  keyPoints: z
-    .union([z.array(z.string()), z.string(), z.null()])
-    .optional(),
+  keyPoints: z.union([z.array(z.string()), z.string(), z.null()]).optional(),
 });
 
 export function normalizeResearch(
@@ -36,8 +37,7 @@ export function normalizeResearch(
   let keyPoints: string[] = [];
   if (Array.isArray(r.keyPoints))
     keyPoints = r.keyPoints.filter((s) => typeof s === "string" && s.trim().length > 0);
-  else if (typeof r.keyPoints === "string" && r.keyPoints.trim())
-    keyPoints = [r.keyPoints.trim()];
+  else if (typeof r.keyPoints === "string" && r.keyPoints.trim()) keyPoints = [r.keyPoints.trim()];
   keyPoints = keyPoints.slice(0, 10);
 
   return { ok: true, result: { summary, keyPoints } };
@@ -46,6 +46,8 @@ export function normalizeResearch(
 const SYNTHESIS_SYSTEM = `You are a deep-research librarian feeding factual grounding to a live voice agent.
 
 Synthesize from your training knowledge — you do NOT have web search available on this call. Be confident and concrete; do not hedge about lack of information.
+
+If a "REAL CITED PAPERS" block is provided below, those abstracts were fetched live from arXiv/Semantic Scholar for papers this specific paper actually cites — they are verified, not hallucinated. Ground your answer in them for anything they cover, in preference to your own training-knowledge recall about those specific works.
 
 Final output rules (strict):
 - Return a single JSON object matching the schema: {"summary": string, "keyPoints": string[]}.
@@ -56,6 +58,47 @@ Final output rules (strict):
 export interface ResearchInput {
   query: string;
   pdfExcerpt?: string;
+  /** Pre-formatted block of real fetched citation abstracts — see buildCitationContext(). */
+  citationContext?: string;
+}
+
+export interface CitationCandidate {
+  arxivId?: string;
+  titleGuess?: string;
+}
+
+const MAX_CITATION_ABSTRACT_LENGTH = 600;
+const MAX_CITATION_CONTEXT_LENGTH = 4000;
+
+/**
+ * Resolves a short list of candidate references (see references.ts's
+ * rankReferencesByQuery) into real fetched abstracts and formats them into
+ * a single block for generateResearch's prompt. Best-effort throughout —
+ * resolveReference() already degrades individual lookup failures to null,
+ * so this can only ever produce a shorter (possibly empty) block, never throw.
+ */
+export async function buildCitationContext(
+  candidates: CitationCandidate[],
+  fetchImpl?: FetchLike,
+): Promise<{ block: string; resolvedCount: number }> {
+  const resolved = await Promise.all(candidates.map((c) => resolveReference(c, fetchImpl)));
+  const papers = resolved.filter((p): p is ResolvedPaper => !!p);
+  if (papers.length === 0) return { block: "", resolvedCount: 0 };
+
+  const block = papers
+    .map((p, i) => {
+      const authors =
+        p.authors && p.authors.length > 0 ? p.authors.slice(0, 3).join(", ") : "unknown authors";
+      const year = p.year ? ` (${p.year})` : "";
+      const abstract = p.abstract
+        ? p.abstract.slice(0, MAX_CITATION_ABSTRACT_LENGTH)
+        : "no abstract available";
+      return `${i + 1}. "${p.title}" — ${authors}${year}. Abstract: ${abstract}`;
+    })
+    .join("\n")
+    .slice(0, MAX_CITATION_CONTEXT_LENGTH);
+
+  return { block, resolvedCount: papers.length };
 }
 
 export interface ResearchRunResult {
@@ -72,7 +115,9 @@ export interface ResearchRunResult {
 
 function isBillingOrCreditError(err: unknown) {
   const msg = err instanceof Error ? err.message : String(err);
-  return /\b402\b|payment required|billing|credits? exhausted|insufficient credits|add credits|quota/i.test(msg);
+  return /\b402\b|payment required|billing|credits? exhausted|insufficient credits|add credits|quota/i.test(
+    msg,
+  );
 }
 
 /** Robust JSON extraction. Gemini may wrap fenced JSON or prepend prose when
@@ -80,7 +125,10 @@ function isBillingOrCreditError(err: unknown) {
  *  response schema in that combination). */
 export function extractJsonFromText(raw: string): unknown {
   if (!raw) return undefined;
-  let cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  let cleaned = raw
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
+    .trim();
   const start = cleaned.search(/[\{\[]/);
   if (start === -1) return undefined;
   const openChar = cleaned[start];
@@ -124,9 +172,7 @@ function defaultGeminiImpl(apiKey: string): GeminiGenerateContent {
   return (args) => ai.models.generateContent(args);
 }
 
-const GEMINI_MODELS = [
-  "gemini-3.1-flash-lite",
-] as const;
+const GEMINI_MODELS = ["gemini-3.1-flash-lite"] as const;
 
 const RESPONSE_SCHEMA = {
   type: Type.OBJECT,
@@ -150,9 +196,7 @@ export async function generateResearch(
 ): Promise<ResearchRunResult> {
   const apiKey = opts.apiKey ?? process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error(
-      "No AI provider configured. Set GEMINI_API_KEY to use the research agent.",
-    );
+    throw new Error("No AI provider configured. Set GEMINI_API_KEY to use the research agent.");
   }
 
   const maxAttempts = Math.min(opts.maxAttempts ?? 1, 1);
@@ -177,7 +221,7 @@ export async function generateResearch(
       ? `\n\nPREVIOUS ATTEMPT FAILED: ${lastError}\nProduce a corrected JSON briefing that matches the schema exactly.`
       : "";
     const userText = `Research query: ${input.query}
-${input.pdfExcerpt ? `\nThe user is reading this paper (excerpt):\n${input.pdfExcerpt.slice(0, 3500)}\n` : ""}
+${input.pdfExcerpt ? `\nThe user is reading this paper (excerpt):\n${input.pdfExcerpt.slice(0, 3500)}\n` : ""}${input.citationContext ? `\nREAL CITED PAPERS (fetched live from arXiv/Semantic Scholar for works this paper cites):\n${input.citationContext}\n` : ""}
 Return a JSON object matching the schema (summary + keyPoints). No URLs or citations in the values.${correction}`;
 
     try {
@@ -231,4 +275,3 @@ Return a JSON object matching the schema (summary + keyPoints). No URLs or citat
 export const _internals = { extractJsonFromText, GEMINI_MODELS, RESPONSE_SCHEMA };
 
 export { Type };
-

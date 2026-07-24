@@ -18,6 +18,8 @@ NO REPEAT VISUALS RULE: Every slide must be unique. Do NOT call \`visualize\` wi
 
 MANDATORY RESEARCH RULE: If the user asks about a concept, technique, prior work, comparison, related paper, or background that is NOT clearly covered in the uploaded paper text, you may call \`research\` with ONE focused query BEFORE answering. Never make more than one \`research\` call for a single user turn, and never dispatch multiple research queries at once. Examples that may require research: "tell me more about expander graphs", "how does this compare to X", "what's the history of Y", "explain the prerequisites for Z". The research tool is fire-and-forget; call it, keep talking from what you already know, and weave in the briefing when it streams back.
 
+CITATION-FOLLOWING RULE: When the user's question is specifically about one of THIS paper's own cited/referenced works (e.g. "what did reference 12 actually show", "how is this different from the prior work it cites", "who came up with the baseline this compares against"), call \`research\` with scope="citations" (or the default "both") so the briefing grounds itself in that cited paper's real abstract instead of a generic answer. Use scope="web" only for background that has nothing to do with this paper's own bibliography.
+
 SILENT BACKGROUND TOOLS RULE (CRITICAL): The \`research\` and \`visualize\` tools are SILENT background tasks. NEVER tell the user you are "initiating a research query", "looking that up", "pulling up a diagram", "let me check", "one moment", or anything that mentions or hints at tool use. Do not narrate, announce, preface, or apologize for these tool calls. Just call the tool and immediately answer the user's question with whatever you already know — when the background result streams back as context, weave it in naturally as if it had always been part of your knowledge.
 
 NO INTERNAL SYNTAX LEAKAGE (CRITICAL): Tool calls go through the structured tool-calling channel, NEVER as spoken text. Your spoken response must be plain natural English ONLY. NEVER speak, write, or output any of: the literal strings "tool_code", "thought", "default_api", "print(", function-call syntax like \`visualize(...)\` or \`research(...)\`, code fences, parameter names like \`topic=\` or \`hint=\`, or any internal reasoning trace. If you catch yourself about to say any of those, stop and just speak the answer in plain sentences. The user only hears your voice — they must never hear tool-call syntax or chain-of-thought.
@@ -56,7 +58,7 @@ export const SCHOLAR_CLIENT_TOOLS = [
     type: "client" as const,
     name: "research",
     description:
-      "Dispatch one focused background web + citation search and stream the resulting briefing back as grounding context. Fire-and-forget. Use at most once per user turn when the user asks about prior work, comparisons, or external context.",
+      "Dispatch one focused background research query and stream the resulting briefing back as grounding context. When relevant, this also resolves real abstracts from papers this specific paper cites (fetched live from arXiv/Semantic Scholar) — use scope='citations' or 'both' whenever the query is really about one of the paper's own references, not just general background. Fire-and-forget. Use at most once per user turn.",
     expects_response: false,
     parameters: {
       type: "object",
@@ -68,7 +70,8 @@ export const SCHOLAR_CLIENT_TOOLS = [
         scope: {
           type: "string",
           enum: ["web", "citations", "both"],
-          description: "Search scope. Defaults to 'both'.",
+          description:
+            "'web': general background from training knowledge only, fastest, use for broad conceptual questions unrelated to this paper's own bibliography. 'citations': ground the answer in real fetched abstracts of papers THIS paper cites — use when the user asks what a specific cited/prior work actually says or shows, or asks how this paper compares to its own references. 'both' (default): try citation grounding first, fall back to general background. When in doubt, use 'both'.",
         },
       },
       required: ["query"],
@@ -121,4 +124,3 @@ export function buildScholarAgentUpdatePayload() {
     ...buildScholarAgentConfigBody(),
   };
 }
-

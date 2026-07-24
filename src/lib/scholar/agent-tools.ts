@@ -1,3 +1,4 @@
+import { rankReferencesByQuery, extractReferences } from "./references";
 import type { CanvasItem, CanvasSpec } from "./store";
 import { useScholarStore } from "./store";
 
@@ -26,6 +27,26 @@ interface ResearchRequestPayload {
   query: string;
   pdfExcerpt?: string;
   scope?: "web" | "citations" | "both";
+  citationCandidates?: Array<{ arxivId?: string; titleGuess?: string }>;
+}
+
+/**
+ * When the agent asks for citation grounding, narrow the paper's full
+ * (often 50-70 entry) bibliography down to the handful of references
+ * actually relevant to this query — extractReferences() needs the full PDF
+ * text (references live at the end, well past the 12k-char excerpt sent for
+ * general research), so this runs client-side where that text already
+ * lives, and only the ranked candidates (not the whole reference list) go
+ * over the wire.
+ */
+function collectCitationCandidates(query: string, scope: ResearchParams["scope"], pdfText: string) {
+  if (scope === "web") return [];
+  const refs = extractReferences(pdfText);
+  if (refs.length === 0) return [];
+  return rankReferencesByQuery(refs, query).map((r) => ({
+    arxivId: r.arxivId,
+    titleGuess: r.titleGuess,
+  }));
 }
 
 interface ResearchApiResponse {
@@ -458,11 +479,17 @@ export function buildClientTools(host: ToolHost) {
       void (async () => {
         try {
           const ctx = getPdfContext();
+          const citationCandidates = collectCitationCandidates(
+            params.query,
+            params.scope,
+            ctx.text,
+          );
           const json = await fetchResearchBriefing(
             {
               query: params.query,
               pdfExcerpt: ctx.text.slice(0, 12_000),
               scope: params.scope,
+              citationCandidates: citationCandidates.length > 0 ? citationCandidates : undefined,
             },
             fetch,
             { attempts: 1 },

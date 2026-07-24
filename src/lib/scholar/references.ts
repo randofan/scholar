@@ -132,8 +132,11 @@ function extractArxivId(raw: string): string | undefined {
 }
 
 function extractYear(raw: string): number | undefined {
-  const paren = YEAR_PAREN_RE.exec(raw)?.[0];
-  const bare = (paren ?? raw).match(YEAR_BARE_RE)?.[0];
+  // Strip arXiv-ID-shaped substrings first — "2005.06789" would otherwise
+  // false-positive-match YEAR_BARE_RE on its leading "2005".
+  const withoutArxivId = raw.replace(/\d{4}\.\d{4,5}/g, " ");
+  const paren = YEAR_PAREN_RE.exec(withoutArxivId)?.[0];
+  const bare = (paren ?? withoutArxivId).match(YEAR_BARE_RE)?.[0];
   return bare ? Number(bare) : undefined;
 }
 
@@ -203,4 +206,67 @@ export function extractReferences(fullText: string): Reference[] {
       ...(titleGuess ? { titleGuess } : {}),
     };
   });
+}
+
+const STOPWORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "of",
+  "for",
+  "and",
+  "or",
+  "to",
+  "in",
+  "on",
+  "with",
+  "is",
+  "are",
+  "how",
+  "what",
+  "does",
+  "this",
+  "that",
+  "compare",
+  "compares",
+  "comparison",
+  "paper",
+  "prior",
+  "work",
+]);
+
+function queryTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 2 && !STOPWORDS.has(t));
+}
+
+/**
+ * Rank extracted references by relevance to a natural-language research
+ * query, using plain keyword overlap against each reference's titleGuess
+ * (falling back to its raw text) — no embeddings/LLM call, since this only
+ * needs to narrow ~60 references down to the 2-3 worth a real network fetch
+ * before research(scope="citations") resolves them. Returns only references
+ * with at least one matching token; callers should treat an empty result as
+ * "nothing in this paper's bibliography looks relevant."
+ */
+export function rankReferencesByQuery(
+  references: Reference[],
+  query: string,
+  limit = 3,
+): Reference[] {
+  const qTokens = new Set(queryTokens(query));
+  if (qTokens.size === 0) return [];
+
+  const scored = references
+    .map((ref) => {
+      const haystack = queryTokens(ref.titleGuess ?? ref.raw);
+      const score = haystack.filter((t) => qTokens.has(t)).length;
+      return { ref, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, limit).map(({ ref }) => ref);
 }

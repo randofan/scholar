@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractReferences } from "./references";
+import { extractReferences, rankReferencesByQuery, type Reference } from "./references";
 
 // Mirrors extractPdfText()'s actual output shape: no newlines within a page
 // (items are space-joined), pages separated by "\n\n--- Page N ---\n".
@@ -45,6 +45,16 @@ describe("extractReferences", () => {
     const refs = extractReferences(text);
     expect(refs[0].year).toBe(2018);
     expect(refs[1].year).toBe(2021);
+  });
+
+  it("does not mistake the leading digits of an arXiv ID for the publication year", () => {
+    const text = fakePdfText([
+      "References [1] A. Author. A paper with an arXiv id. arXiv:2005.06789, 2021.",
+    ]);
+    const refs = extractReferences(text);
+    // Without the arXiv-ID guard this would wrongly extract 2005 (from the
+    // ID's own "2005.06789") instead of the real publication year, 2021.
+    expect(refs[0].year).toBe(2021);
   });
 
   it("falls back to decimal-numbered splitting when there are no bracket markers", () => {
@@ -142,5 +152,42 @@ describe("extractReferences", () => {
     expect(refs).toHaveLength(1);
     expect(refs[0].index).toBeNull();
     expect(refs[0].raw).toContain("Some Title Without Any Numbering");
+  });
+});
+
+describe("rankReferencesByQuery", () => {
+  const refs: Reference[] = [
+    { index: 1, raw: "raw 1", titleGuess: "Expander graphs for random number generation" },
+    { index: 2, raw: "raw 2", titleGuess: "Fat-tree topologies for datacenter networks" },
+    {
+      index: 3,
+      raw: "raw 3",
+      titleGuess: "Slim fly: a cost effective low-diameter network topology",
+    },
+    { index: 4, raw: "Something about congestion control with no titleGuess set at all" },
+  ];
+
+  it("ranks references by keyword overlap with the query, best match first", () => {
+    const ranked = rankReferencesByQuery(refs, "how do expander graphs help with RNG design?");
+    expect(ranked[0].index).toBe(1);
+  });
+
+  it("matches on raw text when titleGuess is missing", () => {
+    const ranked = rankReferencesByQuery(refs, "congestion control mechanisms");
+    expect(ranked.map((r) => r.index)).toContain(4);
+  });
+
+  it("returns [] when nothing overlaps with the query", () => {
+    expect(rankReferencesByQuery(refs, "quantum entanglement in photonic circuits")).toEqual([]);
+  });
+
+  it("returns [] for a query with only stopwords", () => {
+    expect(rankReferencesByQuery(refs, "the a of and")).toEqual([]);
+  });
+
+  it("respects the limit parameter", () => {
+    const ranked = rankReferencesByQuery(refs, "datacenter network topology", 1);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].index).toBe(3);
   });
 });
