@@ -2,7 +2,12 @@
 // they're independently unit-testable without needing cassettes, network
 // mocks, or the CLI plumbing around them.
 
-import { containsHedgeLanguage, validateAxisLabels, validateMermaid, type Visual } from "../src/lib/scholar/illustrate.server";
+import {
+  containsHedgeLanguage,
+  validateAxisLabels,
+  validateMermaid,
+  type Visual,
+} from "../src/lib/scholar/illustrate.server";
 import type { ResearchResult } from "../src/lib/scholar/research.server";
 
 export interface ScoreOutcome {

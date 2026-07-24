@@ -129,7 +129,7 @@ export function extractJsonFromText(raw: string): unknown {
     .replace(/```json\s*/gi, "")
     .replace(/```\s*/g, "")
     .trim();
-  const start = cleaned.search(/[\{\[]/);
+  const start = cleaned.search(/[{[]/);
   if (start === -1) return undefined;
   const openChar = cleaned[start];
   const closeChar = openChar === "[" ? "]" : "}";
@@ -145,6 +145,7 @@ export function extractJsonFromText(raw: string): unknown {
     candidate
       .replace(/,\s*}/g, "}")
       .replace(/,\s*]/g, "]")
+      // eslint-disable-next-line no-control-regex -- intentionally stripping control chars that break JSON.parse
       .replace(/[\x00-\x1F\x7F]/g, " "),
   ];
   for (const text of attempts) {

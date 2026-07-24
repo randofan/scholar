@@ -60,7 +60,10 @@ describe("loadSkillRules", () => {
 });
 
 describe("distillLessonsIntoSkill", () => {
-  const lessons = ["mermaid render error: Parse error on line 2", "xLabel was a bare 'X' placeholder"];
+  const lessons = [
+    "mermaid render error: Parse error on line 2",
+    "xLabel was a bare 'X' placeholder",
+  ];
 
   it("merges via Workers AI and persists the updated file", async () => {
     const { bucket, store } = memoryBucket({
@@ -79,7 +82,10 @@ describe("distillLessonsIntoSkill", () => {
 
     const rules = await distillLessonsIntoSkill(bucket, ai, lessons);
 
-    expect(ai.run).toHaveBeenCalledWith(DISTILL_MODEL, expect.objectContaining({ messages: expect.any(Array) }));
+    expect(ai.run).toHaveBeenCalledWith(
+      DISTILL_MODEL,
+      expect.objectContaining({ messages: expect.any(Array) }),
+    );
     expect(rules).toContain("Balance every mermaid bracket pair before emitting");
     const persisted = JSON.parse(store.get(VISUALIZE_SKILL_KEY)!);
     expect(persisted.rules).toEqual(rules);
@@ -106,7 +112,9 @@ describe("distillLessonsIntoSkill", () => {
     const { bucket, store } = memoryBucket({
       [VISUALIZE_SKILL_KEY]: skillFile(["Existing rule"]),
     });
-    const ai: WorkersAiLike = { run: vi.fn(async () => Promise.reject(new Error("model unavailable"))) };
+    const ai: WorkersAiLike = {
+      run: vi.fn(async () => Promise.reject(new Error("model unavailable"))),
+    };
 
     const rules = await distillLessonsIntoSkill(bucket, ai, lessons);
 
@@ -131,7 +139,9 @@ describe("distillLessonsIntoSkill", () => {
 
   it("accepts an AI response where response is already an object", async () => {
     const { bucket } = memoryBucket();
-    const ai: WorkersAiLike = { run: vi.fn(async () => ({ response: { rules: ["object-mode rule"] } })) };
+    const ai: WorkersAiLike = {
+      run: vi.fn(async () => ({ response: { rules: ["object-mode rule"] } })),
+    };
     const rules = await distillLessonsIntoSkill(bucket, ai, lessons);
     expect(rules).toEqual(["object-mode rule"]);
   });

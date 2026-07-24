@@ -38,7 +38,10 @@ describe("scoreVisual", () => {
         chartType: "line",
         xKey: "x",
         yKeys: ["y"],
-        data: [{ x: "1", y: 1 }, { x: "2", y: 2 }],
+        data: [
+          { x: "1", y: 1 },
+          { x: "2", y: 2 },
+        ],
         xLabel: "X",
         yLabel: "Throughput (req/s)",
       },

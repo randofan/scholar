@@ -23,7 +23,9 @@ function SlideCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
             <Presentation className="h-3 w-3" />
-            <span>Slide {slideNumber} of {totalSlides}</span>
+            <span>
+              Slide {slideNumber} of {totalSlides}
+            </span>
             <span className="text-muted-foreground">·</span>
             <span className="text-muted-foreground font-normal tracking-normal normal-case">
               {new Date(item.createdAt).toLocaleTimeString([], {

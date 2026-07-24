@@ -17,7 +17,10 @@ describe("decideAgentTurn", () => {
           {
             function: {
               name: "visualize",
-              arguments: JSON.stringify({ topic: "Attention mechanism", hint: "diagram: encoder-decoder flow" }),
+              arguments: JSON.stringify({
+                topic: "Attention mechanism",
+                hint: "diagram: encoder-decoder flow",
+              }),
             },
           },
           {
@@ -37,13 +40,18 @@ describe("decideAgentTurn", () => {
 
     expect(result.answer).toMatch(/core idea/);
     expect(result.toolCalls).toEqual([
-      { name: "visualize", args: { topic: "Attention mechanism", hint: "diagram: encoder-decoder flow" } },
+      {
+        name: "visualize",
+        args: { topic: "Attention mechanism", hint: "diagram: encoder-decoder flow" },
+      },
       { name: "research", args: { query: "prior work on sparse attention", scope: "both" } },
     ]);
   });
 
   it("returns an empty tool-call list when the model doesn't call any tools", async () => {
-    const fetchImpl = vi.fn(async () => groqResponse({ content: "Simple answer, no tools needed." }));
+    const fetchImpl = vi.fn(async () =>
+      groqResponse({ content: "Simple answer, no tools needed." }),
+    );
 
     const result = await decideAgentTurn(
       { question: "What's the title?", pdfExcerpt: "..." },

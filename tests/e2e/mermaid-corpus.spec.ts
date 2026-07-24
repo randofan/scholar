@@ -25,7 +25,9 @@ test.describe("mermaid corpus — real render fidelity", () => {
   });
 
   for (const entry of corpus) {
-    test(`${entry.name}: our validator predicts the real mermaid.render() outcome`, async ({ page }) => {
+    test(`${entry.name}: our validator predicts the real mermaid.render() outcome`, async ({
+      page,
+    }) => {
       const realResult = await page.evaluate(
         (source) => window.__renderMermaidForTest!(source),
         entry.source,

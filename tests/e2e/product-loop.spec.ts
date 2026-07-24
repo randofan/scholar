@@ -29,7 +29,10 @@ test.describe("no-voice product loop (dev harness)", () => {
           ok: true,
           answer: "Expander graphs trade fewer links for near-optimal bisection bandwidth.",
           toolCalls: [
-            { name: "visualize", args: { topic: "Expander graph topology", hint: "diagram: edge expansion" } },
+            {
+              name: "visualize",
+              args: { topic: "Expander graph topology", hint: "diagram: edge expansion" },
+            },
             { name: "research", args: { query: "prior work on expander graphs", scope: "both" } },
           ],
         }),
@@ -89,7 +92,9 @@ test.describe("no-voice product loop (dev harness)", () => {
     await expect(researchFeed.getByText(/spectral graph theory/i)).toBeVisible();
   });
 
-  test("a malformed visualize response surfaces as a visible error, not a silent gap", async ({ page }) => {
+  test("a malformed visualize response surfaces as a visible error, not a silent gap", async ({
+    page,
+  }) => {
     await seedPdfState(page);
 
     await page.route("**/api/agent-turn", async (route) => {
@@ -107,7 +112,10 @@ test.describe("no-voice product loop (dev harness)", () => {
       await route.fulfill({
         status: 500,
         contentType: "application/json",
-        body: JSON.stringify({ ok: false, error: "Failed to generate a valid visual after 2 attempts" }),
+        body: JSON.stringify({
+          ok: false,
+          error: "Failed to generate a valid visual after 2 attempts",
+        }),
       });
     });
 

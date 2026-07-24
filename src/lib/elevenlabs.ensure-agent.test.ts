@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  __resetScholarAgentCache,
-  ensureScholarAgentId,
-} from "./elevenlabs.server";
+import { __resetScholarAgentCache, ensureScholarAgentId } from "./elevenlabs.server";
 import { SCHOLAR_AGENT_NAME } from "./scholar/scholar-agent-config";
 
 const ORIGINAL_KEY = process.env.ELEVENLABS_API_KEY_1;
@@ -55,9 +52,7 @@ describe("ensureScholarAgentId", () => {
   it("creates a new agent (with our client tools) when none exist", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ agents: [] }), { status: 200 }),
-      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ agents: [] }), { status: 200 }))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ agent_id: "agent_new" }), { status: 200 }),
       );
@@ -75,12 +70,12 @@ describe("ensureScholarAgentId", () => {
     expect(toolNames).toEqual(["visualize", "research"]);
     // Overrides must be whitelisted so session-time prompt/firstMessage
     // overrides actually take effect.
-    expect(
-      body.platform_settings.overrides.conversation_config_override.agent.prompt.prompt,
-    ).toBe(true);
-    expect(
-      body.platform_settings.overrides.conversation_config_override.agent.first_message,
-    ).toBe(true);
+    expect(body.platform_settings.overrides.conversation_config_override.agent.prompt.prompt).toBe(
+      true,
+    );
+    expect(body.platform_settings.overrides.conversation_config_override.agent.first_message).toBe(
+      true,
+    );
   });
 
   it("surfaces a useful error when the ElevenLabs API rejects the request", async () => {

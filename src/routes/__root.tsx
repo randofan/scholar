@@ -75,7 +75,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Multimodal Scholar" },
       { name: "description", content: "Voice-driven research companion for academic papers" },
       { property: "og:title", content: "Multimodal Scholar" },
-      { property: "og:description", content: "Voice-driven research companion for academic papers" },
+      {
+        property: "og:description",
+        content: "Voice-driven research companion for academic papers",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],

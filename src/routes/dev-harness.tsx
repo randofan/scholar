@@ -63,7 +63,10 @@ function DevHarnessPage() {
 
   const pushLine = useCallback(
     (role: TranscriptLine["role"], text: string) =>
-      setLines((prev) => [...prev, { id: `${Date.now()}-${lineCounterRef.current++}`, role, text }]),
+      setLines((prev) => [
+        ...prev,
+        { id: `${Date.now()}-${lineCounterRef.current++}`, role, text },
+      ]),
     [],
   );
 
@@ -160,7 +163,11 @@ function DevHarnessPage() {
             htmlFor="dev-pdf"
             className={`flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border p-12 ${parsing ? "pointer-events-none opacity-70" : ""}`}
           >
-            {parsing ? <Loader2 className="h-8 w-8 animate-spin" /> : <Upload className="h-8 w-8" />}
+            {parsing ? (
+              <Loader2 className="h-8 w-8 animate-spin" />
+            ) : (
+              <Upload className="h-8 w-8" />
+            )}
             <span className="text-sm">{parsing ? "Parsing…" : "Upload a PDF to begin"}</span>
             <input
               id="dev-pdf"
@@ -213,7 +220,11 @@ function DevHarnessPage() {
                 onClick={() => void ask()}
                 disabled={thinking || !question.trim()}
               >
-                {thinking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                {thinking ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
               </Button>
             </div>
             <div className="border-t border-border p-2">

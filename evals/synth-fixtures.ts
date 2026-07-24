@@ -38,9 +38,15 @@ interface ResearchCase {
 }
 type EvalCase = VisualizeCase | ResearchCase;
 
-function synthPayload(kind: ReturnType<typeof pickStrictKind>, c: VisualizeCase): Record<string, unknown> {
+function synthPayload(
+  kind: ReturnType<typeof pickStrictKind>,
+  c: VisualizeCase,
+): Record<string, unknown> {
   const title = c.topic.slice(0, 60);
-  const narration = `Illustrates ${c.topic.toLowerCase()} with concrete, labeled detail.`.slice(0, 140);
+  const narration = `Illustrates ${c.topic.toLowerCase()} with concrete, labeled detail.`.slice(
+    0,
+    140,
+  );
 
   switch (kind) {
     case "diagram": {
@@ -78,7 +84,10 @@ function synthPayload(kind: ReturnType<typeof pickStrictKind>, c: VisualizeCase)
         series: [
           {
             name: "Series A",
-            points: Array.from({ length: 10 }, (_, i) => ({ x: String((i + 1) * 8), y: 10 + i * 3.2 })),
+            points: Array.from({ length: 10 }, (_, i) => ({
+              x: String((i + 1) * 8),
+              y: 10 + i * 3.2,
+            })),
           },
         ],
       };
@@ -86,9 +95,15 @@ function synthPayload(kind: ReturnType<typeof pickStrictKind>, c: VisualizeCase)
 }
 
 async function synthVisualize(c: VisualizeCase) {
-  const kind = pickStrictKind({ topic: c.topic, hint: c.hint, pdfExcerpt: c.pdfExcerpt } satisfies IllustrateInput);
+  const kind = pickStrictKind({
+    topic: c.topic,
+    hint: c.hint,
+    pdfExcerpt: c.pdfExcerpt,
+  } satisfies IllustrateInput);
   const payload = synthPayload(kind, c);
-  const responseBody = JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] });
+  const responseBody = JSON.stringify({
+    choices: [{ message: { content: JSON.stringify(payload) } }],
+  });
   await saveCassette(CASSETTE_DIR, {
     name: c.id,
     entries: [

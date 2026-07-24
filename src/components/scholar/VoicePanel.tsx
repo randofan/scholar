@@ -3,12 +3,14 @@ import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import { useServerFn } from "@tanstack/react-start";
 import { useScholarStore } from "@/lib/scholar/store";
 import { buildClientTools, distillSessionLessons } from "@/lib/scholar/agent-tools";
-import { buildScholarContextUpdate, buildScholarVoiceSessionOptions } from "@/lib/scholar/voice-session";
+import {
+  buildScholarContextUpdate,
+  buildScholarVoiceSessionOptions,
+} from "@/lib/scholar/voice-session";
 import { startScholarVoiceSession } from "@/lib/elevenlabs.functions";
 import { Button } from "@/components/ui/button";
 import { Mic, MicOff, Loader2, PhoneOff, Phone } from "lucide-react";
 import { toast } from "sonner";
-
 
 export function VoicePanel() {
   return (
@@ -56,7 +58,10 @@ function VoicePanelContent() {
   const dispatchPreemptiveResearch = (pdfName: string, pdfText: string) => {
     if (preemptiveResearchRef.current === pdfName) return;
     preemptiveResearchRef.current = pdfName;
-    const titleGuess = pdfName.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").trim();
+    const titleGuess = pdfName
+      .replace(/\.pdf$/i, "")
+      .replace(/[_-]+/g, " ")
+      .trim();
     const excerpt = pdfText.slice(0, 1500).replace(/\s+/g, " ").trim();
     const queries = [
       `Background and prior work related to: ${titleGuess}. Context excerpt: ${excerpt.slice(0, 400)}`,
@@ -159,7 +164,6 @@ function VoicePanelContent() {
     })();
   };
 
-
   const stop = async () => {
     await conversation.endSession();
     void distillSessionLessons();
@@ -169,7 +173,9 @@ function VoicePanelContent() {
     if (!connected || !pdf) return;
     if (sentPdfContextRef.current === pdf.name) return;
     sentPdfContextRef.current = pdf.name;
-    conversation.sendContextualUpdate(buildScholarContextUpdate(pdf), { contextId: `pdf:${pdf.name}` });
+    conversation.sendContextualUpdate(buildScholarContextUpdate(pdf), {
+      contextId: `pdf:${pdf.name}`,
+    });
     dispatchPreemptiveResearch(pdf.name, pdf.text);
   }, [connected, conversation, pdf]);
 
@@ -204,12 +210,7 @@ function VoicePanelContent() {
               <PhoneOff className="mr-1.5 h-3.5 w-3.5" /> End
             </Button>
           ) : (
-            <Button
-              size="sm"
-              onClick={start}
-              disabled={connecting || !pdf}
-              className="ring-glow"
-            >
+            <Button size="sm" onClick={start} disabled={connecting || !pdf} className="ring-glow">
               {connecting ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               ) : (

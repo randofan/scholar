@@ -39,7 +39,9 @@ describe("recordingFetch / loadCassette", () => {
     const final = await loadCassette(dir, "example");
     expect(final?.entries).toHaveLength(2);
     expect(final?.entries[0].url).toBe("https://api.example.com/a");
-    expect(JSON.parse(final!.entries[1].responseBody)).toEqual({ echoed: "https://api.example.com/b" });
+    expect(JSON.parse(final!.entries[1].responseBody)).toEqual({
+      echoed: "https://api.example.com/b",
+    });
   });
 });
 
@@ -87,7 +89,9 @@ describe("recordingCall / replayingCall (non-fetch SDK calls)", () => {
 
     const cassette = await loadCassette(dir, "gemini");
     expect(cassette?.entries).toHaveLength(1);
-    expect(JSON.parse(cassette!.entries[0].requestBody)).toEqual({ model: "gemini-3.1-flash-lite" });
+    expect(JSON.parse(cassette!.entries[0].requestBody)).toEqual({
+      model: "gemini-3.1-flash-lite",
+    });
 
     const replay = replayingCall<{ text: string }>(cassette!);
     expect(await replay({})).toEqual({ text: "echo:gemini-3.1-flash-lite" });

@@ -103,7 +103,9 @@ export async function decideAgentTurn(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Groq agent-turn call failed: ${res.status} ${res.statusText} ${text.slice(0, 400)}`);
+    throw new Error(
+      `Groq agent-turn call failed: ${res.status} ${res.statusText} ${text.slice(0, 400)}`,
+    );
   }
   const json = (await res.json()) as GroqChatResponse;
   const message = json.choices?.[0]?.message;

@@ -139,7 +139,10 @@ export async function distillLessonsIntoSkill(
       });
       updated = extractRulesFromAiResult(result);
     } catch (err) {
-      console.warn("skill distillation via Workers AI failed", err instanceof Error ? err.message : err);
+      console.warn(
+        "skill distillation via Workers AI failed",
+        err instanceof Error ? err.message : err,
+      );
     }
   }
 
