@@ -1,0 +1,12 @@
+{
+  "name": "raft-comparison-research",
+  "entries": [
+    {
+      "url": "call",
+      "method": "CALL",
+      "requestBody": "",
+      "status": 200,
+      "responseBody": "{\"text\":\"{\\\"summary\\\":\\\"Background context on how does Raft compare to Paxos for leader election: prior approaches trade off complexity against robustness, and this line of work extends earlier results with a more general analysis and stronger empirical validation across several benchmark settings.\\\",\\\"keyPoints\\\":[\\\"Prior work established the baseline approach referenced by \\\\\\\"how does Raft compare to Paxos for leader election\\\\\\\".\\\",\\\"Later extensions generalized the technique to a broader class of settings.\\\",\\\"Empirical results consistently favor the more recent variants on standard benchmarks.\\\"]}\"}"
+    }
+  ]
+}

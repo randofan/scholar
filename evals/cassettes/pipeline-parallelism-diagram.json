@@ -1,0 +1,12 @@
+{
+  "name": "pipeline-parallelism-diagram",
+  "entries": [
+    {
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "method": "POST",
+      "requestBody": "",
+      "status": 200,
+      "responseBody": "{\"choices\":[{\"message\":{\"content\":\"{\\\"title\\\":\\\"Pipeline parallelism stage schedule\\\",\\\"narration\\\":\\\"Illustrates pipeline parallelism stage schedule with concrete, labeled detail.\\\",\\\"mermaid\\\":\\\"flowchart LR\\\\n  A[Input] --> B[Process]\\\\n  B --> C{Decision}\\\\n  C -- yes --> D[Path A]\\\\n  C -- no --> E[Path B]\\\"}\"}}]}"
+    }
+  ]
+}

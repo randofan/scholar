@@ -1,0 +1,12 @@
+{
+  "name": "ablation-table",
+  "entries": [
+    {
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "method": "POST",
+      "requestBody": "",
+      "status": 200,
+      "responseBody": "{\"choices\":[{\"message\":{\"content\":\"{\\\"title\\\":\\\"Ablation study of model components\\\",\\\"narration\\\":\\\"Illustrates ablation study of model components with concrete, labeled detail.\\\",\\\"columns\\\":[\\\"Dimension\\\",\\\"Baseline\\\",\\\"Proposed\\\"],\\\"rows\\\":[[\\\"Cost\\\",\\\"High\\\",\\\"Low\\\"],[\\\"Throughput\\\",\\\"Moderate\\\",\\\"High\\\"],[\\\"Complexity\\\",\\\"Low\\\",\\\"Moderate\\\"]]}\"}}]}"
+    }
+  ]
+}

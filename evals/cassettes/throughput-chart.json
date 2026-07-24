@@ -1,0 +1,12 @@
+{
+  "name": "throughput-chart",
+  "entries": [
+    {
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "method": "POST",
+      "requestBody": "",
+      "status": 200,
+      "responseBody": "{\"choices\":[{\"message\":{\"content\":\"{\\\"title\\\":\\\"Throughput vs batch size for the serving system\\\",\\\"narration\\\":\\\"Illustrates throughput vs batch size for the serving system with concrete, labeled detail.\\\",\\\"chartType\\\":\\\"line\\\",\\\"xLabel\\\":\\\"Input size (units)\\\",\\\"yLabel\\\":\\\"Measured value (ms)\\\",\\\"series\\\":[{\\\"name\\\":\\\"Series A\\\",\\\"points\\\":[{\\\"x\\\":\\\"8\\\",\\\"y\\\":10},{\\\"x\\\":\\\"16\\\",\\\"y\\\":13.2},{\\\"x\\\":\\\"24\\\",\\\"y\\\":16.4},{\\\"x\\\":\\\"32\\\",\\\"y\\\":19.6},{\\\"x\\\":\\\"40\\\",\\\"y\\\":22.8},{\\\"x\\\":\\\"48\\\",\\\"y\\\":26},{\\\"x\\\":\\\"56\\\",\\\"y\\\":29.200000000000003},{\\\"x\\\":\\\"64\\\",\\\"y\\\":32.400000000000006},{\\\"x\\\":\\\"72\\\",\\\"y\\\":35.6},{\\\"x\\\":\\\"80\\\",\\\"y\\\":38.8}]}]}\"}}]}"
+    }
+  ]
+}

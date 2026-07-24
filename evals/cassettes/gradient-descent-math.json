@@ -1,0 +1,12 @@
+{
+  "name": "gradient-descent-math",
+  "entries": [
+    {
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "method": "POST",
+      "requestBody": "",
+      "status": 200,
+      "responseBody": "{\"choices\":[{\"message\":{\"content\":\"{\\\"title\\\":\\\"Convergence bound for stochastic gradient descent\\\",\\\"narration\\\":\\\"Illustrates convergence bound for stochastic gradient descent with concrete, labeled detail.\\\",\\\"inline\\\":\\\"\\\",\\\"steps\\\":[\\\"f(x) = \\\\\\\\sum_{i=1}^{n} w_i x_i\\\",\\\"\\\\\\\\nabla f(x) = w\\\",\\\"x^{*} = \\\\\\\\arg\\\\\\\\min_x f(x)\\\"]}\"}}]}"
+    }
+  ]
+}

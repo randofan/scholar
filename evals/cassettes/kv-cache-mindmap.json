@@ -1,0 +1,12 @@
+{
+  "name": "kv-cache-mindmap",
+  "entries": [
+    {
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "method": "POST",
+      "requestBody": "",
+      "status": 200,
+      "responseBody": "{\"choices\":[{\"message\":{\"content\":\"{\\\"title\\\":\\\"Key contributions of the paper\\\",\\\"narration\\\":\\\"Illustrates key contributions of the paper with concrete, labeled detail.\\\",\\\"mermaid\\\":\\\"mindmap\\\\n  root((Key contributions of the paper))\\\\n    Aspect one\\\\n      Detail A\\\\n    Aspect two\\\\n      Detail B\\\\n    Aspect three\\\\n      Detail C\\\"}\"}}]}"
+    }
+  ]
+}

@@ -1,0 +1,287 @@
+{
+  "generatedAt": "2026-07-24T04:40:10.632Z",
+  "mode": "replay",
+  "total": 22,
+  "passed": 22,
+  "skipped": 0,
+  "passRate": 1,
+  "avgAttempts": 1,
+  "avgLatencyMs": 0.45454545454545453,
+  "cases": [
+    {
+      "id": "attention-diagram",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 2,
+      "kind": "diagram",
+      "checks": {
+        "noHedge": true,
+        "mermaidValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "bf16-diagram",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "diagram",
+      "checks": {
+        "noHedge": true,
+        "mermaidValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "expander-graph-diagram",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "diagram",
+      "checks": {
+        "noHedge": true,
+        "mermaidValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "cache-lookup-diagram",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "diagram",
+      "checks": {
+        "noHedge": true,
+        "mermaidValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "consensus-state-diagram",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 1,
+      "kind": "diagram",
+      "checks": {
+        "noHedge": true,
+        "mermaidValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "quantization-chart",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "chart",
+      "checks": {
+        "noHedge": true,
+        "axisLabelsValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "throughput-chart",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "chart",
+      "checks": {
+        "noHedge": true,
+        "axisLabelsValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "latency-chart",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "chart",
+      "checks": {
+        "noHedge": true,
+        "axisLabelsValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "comparison-table",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 1,
+      "kind": "table",
+      "checks": {
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "ablation-table",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "table",
+      "checks": {
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "edge-expansion-math",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "math",
+      "checks": {
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "attention-complexity-math",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "math",
+      "checks": {
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "gradient-descent-math",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 1,
+      "kind": "math",
+      "checks": {
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "mixture-of-experts-diagram",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "diagram",
+      "checks": {
+        "noHedge": true,
+        "mermaidValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "pipeline-parallelism-diagram",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "kind": "diagram",
+      "checks": {
+        "noHedge": true,
+        "mermaidValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "kv-cache-mindmap",
+      "type": "visualize",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 1,
+      "kind": "diagram",
+      "checks": {
+        "noHedge": true,
+        "mermaidValid": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "expander-background-research",
+      "type": "research",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 3,
+      "checks": {
+        "hasSummary": true,
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "raft-comparison-research",
+      "type": "research",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "checks": {
+        "hasSummary": true,
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "sparse-attention-research",
+      "type": "research",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "checks": {
+        "hasSummary": true,
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "moe-history-research",
+      "type": "research",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 1,
+      "checks": {
+        "hasSummary": true,
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "quantization-methods-research",
+      "type": "research",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "checks": {
+        "hasSummary": true,
+        "noHedge": true
+      },
+      "reasons": []
+    },
+    {
+      "id": "pipeline-bubble-research",
+      "type": "research",
+      "pass": true,
+      "attempts": 1,
+      "latencyMs": 0,
+      "checks": {
+        "hasSummary": true,
+        "noHedge": true
+      },
+      "reasons": []
+    }
+  ]
+}

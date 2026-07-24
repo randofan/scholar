@@ -1,0 +1,12 @@
+{
+  "name": "cache-lookup-diagram",
+  "entries": [
+    {
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "method": "POST",
+      "requestBody": "",
+      "status": 200,
+      "responseBody": "{\"choices\":[{\"message\":{\"content\":\"{\\\"title\\\":\\\"Cache-augmented inference pipeline\\\",\\\"narration\\\":\\\"Illustrates cache-augmented inference pipeline with concrete, labeled detail.\\\",\\\"mermaid\\\":\\\"flowchart LR\\\\n  A[Input] --> B[Process]\\\\n  B --> C{Decision}\\\\n  C -- yes --> D[Path A]\\\\n  C -- no --> E[Path B]\\\"}\"}}]}"
+    }
+  ]
+}

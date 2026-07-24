@@ -9,6 +9,12 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "eval": "bun evals/run.ts",
+    "eval:check": "bun evals/run.ts --check",
+    "eval:live": "bun evals/run.ts --live --budget=30",
+    "eval:record": "bun evals/run.ts --live --record --budget=30",
+    "verify": "vitest run && bun run eval:check && bun run test:e2e",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

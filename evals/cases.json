@@ -1,0 +1,156 @@
+[
+  {
+    "id": "attention-diagram",
+    "type": "visualize",
+    "topic": "Scaled dot-product attention",
+    "hint": "diagram: query-key-value flow through softmax and weighted sum",
+    "pdfExcerpt": "We compute attention as a weighted sum of values, where the weight assigned to each value is computed by a compatibility function of the query with the corresponding key. In practice we compute attention on a set of queries simultaneously, packed into a matrix Q. The keys and values are also packed into matrices K and V. Attention(Q,K,V) = softmax(QK^T / sqrt(d_k)) V."
+  },
+  {
+    "id": "bf16-diagram",
+    "type": "visualize",
+    "topic": "BF16 decomposition and reconstruction",
+    "hint": "diagram: flow showing how a BF16 value splits into sign, exponent, mantissa and is reconstructed",
+    "pdfExcerpt": "BFloat16 (BF16) is a 16-bit floating-point format with 1 sign bit, 8 exponent bits, and 7 mantissa bits. Decomposition extracts these three components from a 32-bit FP32 representation. Reconstruction reassembles them back into FP32 by zero-padding the mantissa."
+  },
+  {
+    "id": "expander-graph-diagram",
+    "type": "visualize",
+    "topic": "RNG expander graph topology",
+    "hint": "diagram: expander graph with edge-expansion cuts, contrasted with a fat-tree hierarchy",
+    "pdfExcerpt": "Expander graphs provide near-optimal bisection bandwidth with far fewer links than a fat tree. Edge expansion h(G) measures the minimum ratio of the boundary of a vertex subset to its size. Random regular graphs achieve high expansion with high probability, making them attractive as datacenter network topologies."
+  },
+  {
+    "id": "cache-lookup-diagram",
+    "type": "visualize",
+    "topic": "Cache-augmented inference pipeline",
+    "hint": "diagram: request flow through tokenizer, cache lookup, model, and response",
+    "pdfExcerpt": "The system caches intermediate key-value states keyed by prompt prefix hash. On a cache hit, the stored state is reused, skipping recomputation of the shared prefix. On a miss, the full forward pass runs and the result is stored for future reuse."
+  },
+  {
+    "id": "consensus-state-diagram",
+    "type": "visualize",
+    "topic": "Raft leader election state machine",
+    "hint": "diagram: state machine for follower, candidate, and leader transitions",
+    "pdfExcerpt": "Each server is in one of three states: follower, candidate, or leader. A follower that receives no communication converts to a candidate and starts an election. If it receives votes from a majority, it becomes leader. If another server establishes itself as leader, the candidate reverts to follower."
+  },
+  {
+    "id": "quantization-chart",
+    "type": "visualize",
+    "topic": "Quantization error vs bit width",
+    "hint": "chart: quantization error decreasing as bit width increases from 2 to 16 bits",
+    "pdfExcerpt": "We measure mean-squared quantization error across bit widths from 2 to 16 bits on a held-out weight distribution. Error decreases roughly exponentially with bit width, with diminishing returns beyond 8 bits for this model family."
+  },
+  {
+    "id": "throughput-chart",
+    "type": "visualize",
+    "topic": "Throughput vs batch size for the serving system",
+    "hint": "chart: request throughput scaling with batch size before saturating",
+    "pdfExcerpt": "We sweep batch size from 1 to 256 and measure sustained throughput on an A100 GPU. Throughput scales roughly linearly with batch size until the KV cache exceeds available memory, at which point it plateaus."
+  },
+  {
+    "id": "latency-chart",
+    "type": "visualize",
+    "topic": "Tail latency across sequence lengths",
+    "hint": "chart: p99 latency increasing with sequence length",
+    "pdfExcerpt": "We report p50, p95, and p99 latency for sequence lengths from 128 to 8192 tokens. Tail latency grows superlinearly past 4096 tokens due to quadratic attention cost, motivating the sparse attention variant proposed in Section 4."
+  },
+  {
+    "id": "comparison-table",
+    "type": "visualize",
+    "topic": "Baseline comparison across topologies",
+    "hint": "table: rows for cost, throughput, cabling complexity across fat-tree, dragonfly, and expander topologies",
+    "pdfExcerpt": "We compare three datacenter network topologies — fat-tree, dragonfly, and random expander — along the axes of bisection bandwidth, cabling cost, and fault tolerance under random link failures."
+  },
+  {
+    "id": "ablation-table",
+    "type": "visualize",
+    "topic": "Ablation study of model components",
+    "hint": "table: rows for each ablated component with the resulting accuracy drop",
+    "pdfExcerpt": "We ablate each of the four proposed components in turn — the gating mechanism, the auxiliary loss, the warm-start schedule, and the sparse routing — and report the resulting drop in validation accuracy for each."
+  },
+  {
+    "id": "edge-expansion-math",
+    "type": "visualize",
+    "topic": "Mathematical formalism of edge expansion",
+    "hint": "math: definition of edge expansion and its relation to the spectral gap",
+    "pdfExcerpt": "Edge expansion is the core property analyzed in this section. For a d-regular graph G, the Cheeger inequality relates the edge expansion h(G) to the second eigenvalue of the normalized adjacency matrix."
+  },
+  {
+    "id": "attention-complexity-math",
+    "type": "visualize",
+    "topic": "Complexity of self-attention",
+    "hint": "math: derivation of the O(n^2) time and memory complexity of full self-attention",
+    "pdfExcerpt": "Standard self-attention computes an n-by-n attention matrix, requiring O(n^2 d) time and O(n^2) memory for sequence length n and hidden dimension d. This quadratic scaling motivates the sparse and linear attention variants surveyed here."
+  },
+  {
+    "id": "gradient-descent-math",
+    "type": "visualize",
+    "topic": "Convergence bound for stochastic gradient descent",
+    "hint": "math: convergence rate bound in terms of step size and variance",
+    "pdfExcerpt": "Under a bounded-variance assumption on the stochastic gradient, standard SGD analysis gives a convergence rate that depends on both the step size and the gradient variance, with the optimal step size shrinking as the variance grows."
+  },
+  {
+    "id": "mixture-of-experts-diagram",
+    "type": "visualize",
+    "topic": "Mixture-of-experts routing architecture",
+    "hint": "diagram: router dispatching tokens to a subset of expert feed-forward networks",
+    "pdfExcerpt": "Each token is routed by a learned gating function to the top-k experts among N feed-forward expert networks. Only the selected experts are activated for that token, keeping the per-token compute roughly constant as N grows."
+  },
+  {
+    "id": "pipeline-parallelism-diagram",
+    "type": "visualize",
+    "topic": "Pipeline parallelism stage schedule",
+    "hint": "diagram: micro-batches flowing through sequential pipeline stages with forward and backward passes",
+    "pdfExcerpt": "The model is partitioned into sequential stages assigned to different devices. Micro-batches are streamed through the pipeline so that multiple stages are active concurrently, reducing the idle 'bubble' time compared to naive sequential execution."
+  },
+  {
+    "id": "kv-cache-mindmap",
+    "type": "visualize",
+    "topic": "Key contributions of the paper",
+    "hint": "diagram: mindmap of the paper's contributions — a new cache eviction policy, a compression scheme, and an evaluation framework",
+    "pdfExcerpt": "This paper makes three contributions: a recency-aware KV-cache eviction policy, a low-rank compression scheme for retained entries, and an evaluation framework comparing both against five baseline systems across three model families."
+  },
+  {
+    "id": "expander-background-research",
+    "type": "research",
+    "query": "background and prior work on expander graphs in datacenter network design",
+    "pdfExcerpt": "Expander graphs provide near-optimal bisection bandwidth with far fewer links than a fat tree.",
+    "scope": "both"
+  },
+  {
+    "id": "raft-comparison-research",
+    "type": "research",
+    "query": "how does Raft compare to Paxos for leader election",
+    "pdfExcerpt": "Each server is in one of three states: follower, candidate, or leader.",
+    "scope": "both"
+  },
+  {
+    "id": "sparse-attention-research",
+    "type": "research",
+    "query": "prior work on sparse and linear attention mechanisms",
+    "pdfExcerpt": "Standard self-attention computes an n-by-n attention matrix, requiring O(n^2 d) time and memory.",
+    "scope": "both"
+  },
+  {
+    "id": "moe-history-research",
+    "type": "research",
+    "query": "history and origins of mixture-of-experts models",
+    "pdfExcerpt": "Each token is routed by a learned gating function to the top-k experts among N feed-forward expert networks.",
+    "scope": "both"
+  },
+  {
+    "id": "quantization-methods-research",
+    "type": "research",
+    "query": "common weight quantization methods used in deep learning inference",
+    "pdfExcerpt": "We measure mean-squared quantization error across bit widths from 2 to 16 bits.",
+    "scope": "both"
+  },
+  {
+    "id": "pipeline-bubble-research",
+    "type": "research",
+    "query": "techniques for reducing pipeline parallelism bubble overhead",
+    "pdfExcerpt": "Micro-batches are streamed through the pipeline so that multiple stages are active concurrently.",
+    "scope": "both"
+  }
+]

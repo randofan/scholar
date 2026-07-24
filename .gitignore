@@ -35,3 +35,7 @@ dist-ssr
 /test-results/
 /playwright-report/
 /playwright/.cache/
+
+# Eval harness output (regenerated every run; evals/baseline.json is the
+# committed comparison target, this is the current-run artifact)
+evals/report.json

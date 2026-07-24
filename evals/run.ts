@@ -1,0 +1,290 @@
+#!/usr/bin/env bun
+// Offline-first eval harness for the two generation paths that make up the
+// product loop (visualize, research). Default mode replays committed
+// cassettes — zero network calls, zero API spend, fully deterministic — so
+// it's safe to run on every change. `--live` hits real providers, gated by
+// `--budget N` so it can never blow through a free tier by accident.
+//
+// Usage:
+//   bun evals/run.ts                    # replay mode (default, free)
+//   bun evals/run.ts --live --budget 20 # live run, capped at 20 API calls
+//   bun evals/run.ts --live --record    # live run that (re)writes cassettes
+//   bun evals/run.ts --check            # replay + compare against baseline, exit 1 on regression
+//   bun evals/run.ts --case=attention-diagram  # run a single case by id
+
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import {
+  loadCassette,
+  recordingCall,
+  recordingFetch,
+  replayingCall,
+  replayingFetch,
+  type Cassette,
+} from "./cassette";
+import { generateVisual } from "../src/lib/scholar/illustrate.server";
+import { generateResearch, type GeminiGenerateContent } from "../src/lib/scholar/research.server";
+import { scoreResearch, scoreVisual } from "./scoring";
+
+const EVALS_DIR = import.meta.dirname;
+const CASSETTE_DIR = path.join(EVALS_DIR, "cassettes");
+const CASES_PATH = path.join(EVALS_DIR, "cases.json");
+const REPORT_PATH = path.join(EVALS_DIR, "report.json");
+const BASELINE_PATH = path.join(EVALS_DIR, "baseline.json");
+
+interface VisualizeCase {
+  id: string;
+  type: "visualize";
+  topic: string;
+  hint?: string;
+  pdfExcerpt: string;
+}
+interface ResearchCase {
+  id: string;
+  type: "research";
+  query: string;
+  pdfExcerpt?: string;
+  scope?: "web" | "citations" | "both";
+}
+type EvalCase = VisualizeCase | ResearchCase;
+
+interface CaseResult {
+  id: string;
+  type: "visualize" | "research";
+  pass: boolean;
+  skipped?: string;
+  attempts?: number;
+  latencyMs?: number;
+  kind?: string;
+  checks: Record<string, boolean>;
+  reasons: string[];
+}
+
+interface Report {
+  generatedAt: string;
+  mode: "replay" | "live";
+  total: number;
+  passed: number;
+  skipped: number;
+  passRate: number;
+  avgAttempts: number;
+  avgLatencyMs: number;
+  cases: CaseResult[];
+}
+
+// ---------------------------------------------------------------------------
+// CLI args
+// ---------------------------------------------------------------------------
+const args = process.argv.slice(2);
+const isLive = args.includes("--live");
+const isRecord = args.includes("--record");
+const isCheck = args.includes("--check");
+const budgetArg = args.find((a) => a.startsWith("--budget="));
+const budget = budgetArg ? Number(budgetArg.split("=")[1]) : 30;
+const caseFilterArg = args.find((a) => a.startsWith("--case="));
+const caseFilter = caseFilterArg ? caseFilterArg.split("=")[1] : undefined;
+
+if (isRecord && !isLive) {
+  console.error("--record requires --live (nothing to record from replay mode)");
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// Budget guard — shared across all live calls this run makes.
+// ---------------------------------------------------------------------------
+let callsMade = 0;
+class BudgetExceededError extends Error {}
+function checkBudget() {
+  if (isLive && callsMade >= budget) {
+    throw new BudgetExceededError(`live call budget (${budget}) exhausted`);
+  }
+}
+
+async function runVisualizeCase(c: VisualizeCase): Promise<CaseResult> {
+  const cassette = await loadCassette(CASSETTE_DIR, c.id);
+  let fetchImpl;
+  if (isLive) {
+    checkBudget();
+    const real = (globalThis.fetch.bind(globalThis)) as typeof fetch;
+    const counted = (async (...fetchArgs: Parameters<typeof fetch>) => {
+      checkBudget();
+      callsMade += 1;
+      return real(...fetchArgs);
+    }) as typeof fetch;
+    fetchImpl = isRecord ? recordingFetch(CASSETTE_DIR, c.id, counted) : counted;
+  } else {
+    if (!cassette) {
+      return {
+        id: c.id,
+        type: "visualize",
+        pass: false,
+        skipped: "no cassette recorded — run with --live --record",
+        checks: {},
+        reasons: [],
+      };
+    }
+    fetchImpl = replayingFetch(cassette);
+  }
+
+  const start = Date.now();
+  try {
+    const result = await generateVisual(
+      { topic: c.topic, hint: c.hint, pdfExcerpt: c.pdfExcerpt },
+      { env: { groqApiKey: process.env.GROQ_API_KEY ?? "cassette-key" }, fetchImpl },
+    );
+    const latencyMs = Date.now() - start;
+    const { checks, reasons, pass } = scoreVisual(result.visual);
+    return {
+      id: c.id,
+      type: "visualize",
+      pass,
+      attempts: result.attempts,
+      latencyMs,
+      kind: result.visual.kind,
+      checks,
+      reasons,
+    };
+  } catch (err) {
+    if (err instanceof BudgetExceededError) {
+      return { id: c.id, type: "visualize", pass: false, skipped: err.message, checks: {}, reasons: [] };
+    }
+    return {
+      id: c.id,
+      type: "visualize",
+      pass: false,
+      latencyMs: Date.now() - start,
+      checks: { generated: false },
+      reasons: [err instanceof Error ? err.message : String(err)],
+    };
+  }
+}
+
+async function runResearchCase(c: ResearchCase): Promise<CaseResult> {
+  const cassette = await loadCassette(CASSETTE_DIR, c.id);
+  let generateContentImpl: GeminiGenerateContent | undefined;
+
+  if (isLive) {
+    checkBudget();
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return { id: c.id, type: "research", pass: false, skipped: "GEMINI_API_KEY not set", checks: {}, reasons: [] };
+    }
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey });
+    const real: GeminiGenerateContent = (a) => {
+      checkBudget();
+      callsMade += 1;
+      return ai.models.generateContent(a);
+    };
+    generateContentImpl = isRecord ? recordingCall(CASSETTE_DIR, c.id, real) : real;
+  } else {
+    if (!cassette) {
+      return {
+        id: c.id,
+        type: "research",
+        pass: false,
+        skipped: "no cassette recorded — run with --live --record",
+        checks: {},
+        reasons: [],
+      };
+    }
+    generateContentImpl = replayingCall(cassette) as GeminiGenerateContent;
+  }
+
+  const start = Date.now();
+  try {
+    const result = await generateResearch(
+      { query: c.query, pdfExcerpt: c.pdfExcerpt },
+      { apiKey: process.env.GEMINI_API_KEY ?? "cassette-key", generateContentImpl },
+    );
+    const latencyMs = Date.now() - start;
+    const { checks, reasons, pass } = scoreResearch(result.result);
+    return { id: c.id, type: "research", pass, attempts: result.attempts, latencyMs, checks, reasons };
+  } catch (err) {
+    if (err instanceof BudgetExceededError) {
+      return { id: c.id, type: "research", pass: false, skipped: err.message, checks: {}, reasons: [] };
+    }
+    return {
+      id: c.id,
+      type: "research",
+      pass: false,
+      latencyMs: Date.now() - start,
+      checks: { generated: false },
+      reasons: [err instanceof Error ? err.message : String(err)],
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+async function main() {
+  const cases = JSON.parse(await readFile(CASES_PATH, "utf-8")) as EvalCase[];
+  const selected = caseFilter ? cases.filter((c) => c.id === caseFilter) : cases;
+  if (selected.length === 0) {
+    console.error(`No cases matched${caseFilter ? ` filter "${caseFilter}"` : ""}.`);
+    process.exit(1);
+  }
+
+  const results: CaseResult[] = [];
+  for (const c of selected) {
+    if (isLive && callsMade >= budget) {
+      results.push({ id: c.id, type: c.type, pass: false, skipped: `live call budget (${budget}) exhausted`, checks: {}, reasons: [] });
+      continue;
+    }
+    const result = c.type === "visualize" ? await runVisualizeCase(c) : await runResearchCase(c);
+    results.push(result);
+    const statusIcon = result.skipped ? "○" : result.pass ? "✓" : "✗";
+    console.log(
+      `${statusIcon} ${c.id}${result.attempts ? ` (attempts=${result.attempts})` : ""}${result.latencyMs ? ` ${result.latencyMs}ms` : ""}${result.skipped ? ` — ${result.skipped}` : ""}`,
+    );
+    if (!result.pass && !result.skipped) {
+      for (const r of result.reasons) console.log(`    ${r}`);
+    }
+  }
+
+  const scored = results.filter((r) => !r.skipped);
+  const skippedCount = results.length - scored.length;
+  const passed = scored.filter((r) => r.pass).length;
+  const attemptsSamples = scored.filter((r) => r.attempts != null).map((r) => r.attempts!);
+  const latencySamples = scored.filter((r) => r.latencyMs != null).map((r) => r.latencyMs!);
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+
+  const report: Report = {
+    generatedAt: new Date().toISOString(),
+    mode: isLive ? "live" : "replay",
+    total: results.length,
+    passed,
+    skipped: skippedCount,
+    passRate: scored.length ? passed / scored.length : 0,
+    avgAttempts: avg(attemptsSamples),
+    avgLatencyMs: avg(latencySamples),
+    cases: results,
+  };
+
+  await writeFile(REPORT_PATH, JSON.stringify(report, null, 2));
+
+  console.log("");
+  console.log(
+    `${passed}/${scored.length} passed (${(report.passRate * 100).toFixed(0)}%), ${skippedCount} skipped, avg ${report.avgAttempts.toFixed(2)} attempts, avg ${report.avgLatencyMs.toFixed(0)}ms`,
+  );
+
+  if (isCheck) {
+    let baseline: Report | null = null;
+    try {
+      baseline = JSON.parse(await readFile(BASELINE_PATH, "utf-8"));
+    } catch {
+      console.error(`No baseline at ${BASELINE_PATH} — run once and commit evals/baseline.json to enable --check.`);
+      process.exit(1);
+    }
+    if (baseline && report.passRate < baseline.passRate) {
+      console.error(
+        `REGRESSION: pass rate ${(report.passRate * 100).toFixed(0)}% is below baseline ${(baseline.passRate * 100).toFixed(0)}%`,
+      );
+      process.exit(1);
+    }
+    console.log(`OK: pass rate ${(report.passRate * 100).toFixed(0)}% meets baseline ${((baseline?.passRate ?? 0) * 100).toFixed(0)}%`);
+  }
+}
+
+void main();

@@ -1,0 +1,12 @@
+{
+  "name": "edge-expansion-math",
+  "entries": [
+    {
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "method": "POST",
+      "requestBody": "",
+      "status": 200,
+      "responseBody": "{\"choices\":[{\"message\":{\"content\":\"{\\\"title\\\":\\\"Mathematical formalism of edge expansion\\\",\\\"narration\\\":\\\"Illustrates mathematical formalism of edge expansion with concrete, labeled detail.\\\",\\\"inline\\\":\\\"\\\",\\\"steps\\\":[\\\"f(x) = \\\\\\\\sum_{i=1}^{n} w_i x_i\\\",\\\"\\\\\\\\nabla f(x) = w\\\",\\\"x^{*} = \\\\\\\\arg\\\\\\\\min_x f(x)\\\"]}\"}}]}"
+    }
+  ]
+}
