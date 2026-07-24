@@ -9,30 +9,38 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SessionRouteImport } from './routes/session'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiSkillsRouteImport } from './routes/api/skills'
-import { Route as ApiResearchRouteImport } from './routes/api/research'
+import { Route as DevHarnessRouteImport } from './routes/dev-harness'
+import { Route as DevMermaidHarnessRouteImport } from './routes/dev-mermaid-harness'
+import { Route as SessionRouteImport } from './routes/session'
+import { Route as ApiAgentTurnRouteImport } from './routes/api/agent-turn'
 import { Route as ApiIllustrateRouteImport } from './routes/api/illustrate'
+import { Route as ApiResearchRouteImport } from './routes/api/research'
+import { Route as ApiSkillsRouteImport } from './routes/api/skills'
 
-const SessionRoute = SessionRouteImport.update({
-  id: '/session',
-  path: '/session',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSkillsRoute = ApiSkillsRouteImport.update({
-  id: '/api/skills',
-  path: '/api/skills',
+const DevHarnessRoute = DevHarnessRouteImport.update({
+  id: '/dev-harness',
+  path: '/dev-harness',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiResearchRoute = ApiResearchRouteImport.update({
-  id: '/api/research',
-  path: '/api/research',
+const DevMermaidHarnessRoute = DevMermaidHarnessRouteImport.update({
+  id: '/dev-mermaid-harness',
+  path: '/dev-mermaid-harness',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionRoute = SessionRouteImport.update({
+  id: '/session',
+  path: '/session',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgentTurnRoute = ApiAgentTurnRouteImport.update({
+  id: '/api/agent-turn',
+  path: '/api/agent-turn',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiIllustrateRoute = ApiIllustrateRouteImport.update({
@@ -40,17 +48,33 @@ const ApiIllustrateRoute = ApiIllustrateRouteImport.update({
   path: '/api/illustrate',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiResearchRoute = ApiResearchRouteImport.update({
+  id: '/api/research',
+  path: '/api/research',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSkillsRoute = ApiSkillsRouteImport.update({
+  id: '/api/skills',
+  path: '/api/skills',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/dev-harness': typeof DevHarnessRoute
+  '/dev-mermaid-harness': typeof DevMermaidHarnessRoute
   '/session': typeof SessionRoute
+  '/api/agent-turn': typeof ApiAgentTurnRoute
   '/api/illustrate': typeof ApiIllustrateRoute
   '/api/research': typeof ApiResearchRoute
   '/api/skills': typeof ApiSkillsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/dev-harness': typeof DevHarnessRoute
+  '/dev-mermaid-harness': typeof DevMermaidHarnessRoute
   '/session': typeof SessionRoute
+  '/api/agent-turn': typeof ApiAgentTurnRoute
   '/api/illustrate': typeof ApiIllustrateRoute
   '/api/research': typeof ApiResearchRoute
   '/api/skills': typeof ApiSkillsRoute
@@ -58,7 +82,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/dev-harness': typeof DevHarnessRoute
+  '/dev-mermaid-harness': typeof DevMermaidHarnessRoute
   '/session': typeof SessionRoute
+  '/api/agent-turn': typeof ApiAgentTurnRoute
   '/api/illustrate': typeof ApiIllustrateRoute
   '/api/research': typeof ApiResearchRoute
   '/api/skills': typeof ApiSkillsRoute
@@ -66,13 +93,31 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/session' | '/api/illustrate' | '/api/research' | '/api/skills'
+    | '/'
+    | '/dev-harness'
+    | '/dev-mermaid-harness'
+    | '/session'
+    | '/api/agent-turn'
+    | '/api/illustrate'
+    | '/api/research'
+    | '/api/skills'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/session' | '/api/illustrate' | '/api/research' | '/api/skills'
+  to:
+    | '/'
+    | '/dev-harness'
+    | '/dev-mermaid-harness'
+    | '/session'
+    | '/api/agent-turn'
+    | '/api/illustrate'
+    | '/api/research'
+    | '/api/skills'
   id:
     | '__root__'
     | '/'
+    | '/dev-harness'
+    | '/dev-mermaid-harness'
     | '/session'
+    | '/api/agent-turn'
     | '/api/illustrate'
     | '/api/research'
     | '/api/skills'
@@ -80,7 +125,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DevHarnessRoute: typeof DevHarnessRoute
+  DevMermaidHarnessRoute: typeof DevMermaidHarnessRoute
   SessionRoute: typeof SessionRoute
+  ApiAgentTurnRoute: typeof ApiAgentTurnRoute
   ApiIllustrateRoute: typeof ApiIllustrateRoute
   ApiResearchRoute: typeof ApiResearchRoute
   ApiSkillsRoute: typeof ApiSkillsRoute
@@ -88,13 +136,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/session': {
-      id: '/session'
-      path: '/session'
-      fullPath: '/session'
-      preLoaderRoute: typeof SessionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -102,18 +143,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/skills': {
-      id: '/api/skills'
-      path: '/api/skills'
-      fullPath: '/api/skills'
-      preLoaderRoute: typeof ApiSkillsRouteImport
+    '/dev-harness': {
+      id: '/dev-harness'
+      path: '/dev-harness'
+      fullPath: '/dev-harness'
+      preLoaderRoute: typeof DevHarnessRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/research': {
-      id: '/api/research'
-      path: '/api/research'
-      fullPath: '/api/research'
-      preLoaderRoute: typeof ApiResearchRouteImport
+    '/dev-mermaid-harness': {
+      id: '/dev-mermaid-harness'
+      path: '/dev-mermaid-harness'
+      fullPath: '/dev-mermaid-harness'
+      preLoaderRoute: typeof DevMermaidHarnessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/session': {
+      id: '/session'
+      path: '/session'
+      fullPath: '/session'
+      preLoaderRoute: typeof SessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agent-turn': {
+      id: '/api/agent-turn'
+      path: '/api/agent-turn'
+      fullPath: '/api/agent-turn'
+      preLoaderRoute: typeof ApiAgentTurnRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/illustrate': {
@@ -123,12 +178,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiIllustrateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/research': {
+      id: '/api/research'
+      path: '/api/research'
+      fullPath: '/api/research'
+      preLoaderRoute: typeof ApiResearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/skills': {
+      id: '/api/skills'
+      path: '/api/skills'
+      fullPath: '/api/skills'
+      preLoaderRoute: typeof ApiSkillsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DevHarnessRoute: DevHarnessRoute,
+  DevMermaidHarnessRoute: DevMermaidHarnessRoute,
   SessionRoute: SessionRoute,
+  ApiAgentTurnRoute: ApiAgentTurnRoute,
   ApiIllustrateRoute: ApiIllustrateRoute,
   ApiResearchRoute: ApiResearchRoute,
   ApiSkillsRoute: ApiSkillsRoute,

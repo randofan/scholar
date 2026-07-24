@@ -1,0 +1,87 @@
+[
+  {
+    "name": "flowchart-basic-ok",
+    "expected": "ok",
+    "source": "flowchart LR\n  Q[User query] --> R{Cache hit?}\n  R -- yes --> C[Return cached]\n  R -- no --> M[Run model]\n  M --> S[(Store result)]\n  S --> C"
+  },
+  {
+    "name": "flowchart-labeled-edge-ok",
+    "expected": "ok",
+    "source": "flowchart LR\n  A[Fat tree] --> B[Core]\n  C[Expander] --> D[Many cuts]"
+  },
+  {
+    "name": "flowchart-thick-dotted-edges-ok",
+    "expected": "ok",
+    "source": "flowchart TD\n  A[Start] ==> B[Fast path]\n  A -.-> C[Fallback path]\n  B --> D[Merge]\n  C --> D"
+  },
+  {
+    "name": "flowchart-bare-bracket-fail",
+    "expected": "fail",
+    "source": "flowchart LR\n  [WP0] --> [WP1]"
+  },
+  {
+    "name": "flowchart-chained-edges-fail",
+    "expected": "fail",
+    "source": "flowchart LR\n  A --> B  B --> C"
+  },
+  {
+    "name": "flowchart-colon-label-ok",
+    "expected": "ok",
+    "source": "flowchart LR\n  A[Step: detail] --> B[End]"
+  },
+  {
+    "name": "flowchart-missing-header-fail",
+    "expected": "fail",
+    "source": "A --> B\nB --> C"
+  },
+  {
+    "name": "flowchart-unbalanced-brackets-fail",
+    "expected": "fail",
+    "source": "graph TD\n  A[Start --> B[End]"
+  },
+  {
+    "name": "mindmap-basic-ok",
+    "expected": "ok",
+    "source": "mindmap\n  root((Paper title))\n    Contribution 1\n      Detail A\n      Detail B\n    Contribution 2\n      Detail C\n    Contribution 3\n      Detail D\n      Detail E"
+  },
+  {
+    "name": "mindmap-arrow-fail",
+    "expected": "fail",
+    "source": "mindmap\n  root((R))\n  A --> B"
+  },
+  {
+    "name": "mindmap-chained-siblings-fail",
+    "expected": "fail",
+    "source": "mindmap\n  root((R5))\n  A -- B\n  A -- C"
+  },
+  {
+    "name": "mindmap-colon-child-ok",
+    "expected": "ok",
+    "source": "mindmap\n  root\n    [Child: thing]"
+  },
+  {
+    "name": "sequenceDiagram-basic-ok",
+    "expected": "ok",
+    "source": "sequenceDiagram\n  participant U as User\n  participant S as Server\n  U->>S: request payload\n  S-->>U: response payload\n  Note over U,S: Optional annotation"
+  },
+  {
+    "name": "classDiagram-basic-ok",
+    "expected": "ok",
+    "source": "classDiagram\n  class Node {\n    +id: string\n    +children: Node[]\n    +visit() void\n  }\n  Node \"1\" --> \"*\" Node : children"
+  },
+  {
+    "name": "stateDiagram-v2-basic-ok",
+    "expected": "ok",
+    "source": "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running : start\n  Running --> Idle : stop\n  Running --> [*] : crash"
+  },
+  {
+    "name": "erDiagram-basic-ok",
+    "expected": "ok",
+    "source": "erDiagram\n  PAPER ||--o{ CITATION : references\n  PAPER {\n    string title\n    int year\n  }\n  CITATION {\n    string title\n    string arxivId\n  }"
+  },
+  {
+    "name": "pie-basic-ok",
+    "expected": "ok",
+    "source": "pie\n  title Dataset split\n  \"Train\" : 70\n  \"Validation\" : 15\n  \"Test\" : 15"
+  }
+]

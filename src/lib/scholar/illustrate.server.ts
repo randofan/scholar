@@ -59,11 +59,6 @@ const MERMAID_HEADERS = [
 // still count as exactly one edge.
 const EDGE_OPERATOR_RE = /-->|-\.->|==>|--x|--o|->>|-->>|-x\b|-o\b/g;
 
-// A4: colons inside bracketed labels are reserved syntax in several diagram
-// types (they terminate the label early or get parsed as a relation). Catch
-// this regardless of diagram type since it's never valid inside a bracket.
-const COLON_IN_BRACKETS_RE = /\[[^[\]]*:[^[\]]*\]|\([^()]*:[^()]*\)|\{[^{}]*:[^{}]*\}/;
-
 // Mindmap bodies are indentation-only; any arrow-like token means the model
 // bled flowchart syntax into a mindmap — "the exact bug we keep hitting" per
 // the prompt guide.
@@ -85,28 +80,38 @@ export function validateMermaid(src: string): { ok: true } | { ok: false; reason
       reason: `first line must start with a mermaid diagram keyword (e.g. ${MERMAID_HEADERS.slice(0, 5).join(", ")}); got "${first}"`,
     };
   }
-  // Balance check on common bracket pairs in node labels.
+
+  const bodyLines = lines.slice(1);
+
+  // Balance check on common bracket pairs in node labels. erDiagram relation
+  // lines use "{" as part of crow's-foot cardinality notation (e.g.
+  // "PAPER ||--o{ CITATION"), not as a label delimiter — those "{"/"}" tokens
+  // aren't a matched pair and would false-positive a balance check, so we
+  // exclude relation lines (any line containing "--") from the curly-brace
+  // count for that diagram type. Confirmed against a real-render corpus test
+  // (tests/e2e/mermaid-corpus.spec.ts) — without this, valid ER diagrams like
+  // "PAPER ||--o{ CITATION : references" were rejected as "unbalanced {}".
+  const countableLines =
+    header === "erDiagram" ? bodyLines.map((l) => (l.includes("--") ? l.replace(/[{}]/g, "") : l)) : bodyLines;
+  const countSrc = [first, ...countableLines].join("\n");
   const pairs: Array<[string, string]> = [
     ["[", "]"],
     ["(", ")"],
     ["{", "}"],
   ];
   for (const [open, close] of pairs) {
-    const o = (src.match(new RegExp(`\\${open}`, "g")) ?? []).length;
-    const c = (src.match(new RegExp(`\\${close}`, "g")) ?? []).length;
+    const o = (countSrc.match(new RegExp(`\\${open}`, "g")) ?? []).length;
+    const c = (countSrc.match(new RegExp(`\\${close}`, "g")) ?? []).length;
     if (o !== c) return { ok: false, reason: `unbalanced ${open}${close} in mermaid source (${o} vs ${c})` };
   }
 
-  const bodyLines = lines.slice(1);
-
-  for (const line of bodyLines) {
-    if (COLON_IN_BRACKETS_RE.test(line)) {
-      return {
-        ok: false,
-        reason: `line "${line}" has a ':' inside a bracketed label — use ' - ' instead (e.g. "A[Step - detail]")`,
-      };
-    }
-  }
+  // NOTE: we used to hard-reject a ':' inside a bracketed label ("A[Step:
+  // detail]") on the theory that colons are reserved syntax there. A
+  // real-render corpus test (tests/e2e/mermaid-corpus.spec.ts) disproved
+  // that for this mermaid version — such labels render fine — so the check
+  // was removed rather than kept as a source of false-positive rejections.
+  // `sanitizeMermaid()` still normalizes colons to " - " defensively, which
+  // is harmless either way.
 
   if (header === "mindmap") {
     for (const line of bodyLines) {
@@ -230,7 +235,7 @@ A. GLOBAL RULES (apply to ALL diagram types)
 A1. Line 1 must be EXACTLY one diagram header keyword and nothing else (optionally followed by direction for flowchart). No prose, no markdown fence, no "diagram:" prefix.
 A2. NEVER mix syntaxes from different diagram types in one source. A "mindmap" file uses mindmap syntax only; a "flowchart" file uses flowchart syntax only; etc.
 A3. Balance every bracket pair: every [ has a ], every ( has a ), every { has a }, every (( has a )), every {{ has a }}.
-A4. NEVER put ':' inside a node label. Use ' - ' or ' — ' instead. (Colons are syntactically reserved in many diagram types.)
+A4. Prefer ' - ' over ':' inside a node label for readability (e.g. "A[Step - detail]"). Colons ARE syntactically meaningful in sequenceDiagram messages, classDiagram relations, and stateDiagram transitions — keep those as-is.
 A5. NEVER put commas, parentheses, or quotes inside an unquoted label. If you need them, wrap the WHOLE label in double quotes: A["Throughput (Gbps), measured"].
 A6. Node IDs are short ASCII identifiers ([A-Za-z][A-Za-z0-9_]*). Labels go inside the shape brackets, not inline as bare text.
 A7. One statement per line. Do NOT chain multiple edges on one line separated by spaces (e.g. "A --> B  B --> C" is INVALID — put each on its own line).
@@ -267,7 +272,6 @@ CORRECT EXAMPLE — COPY THIS SHAPE:
 WRONG examples to avoid:
   [WP0] --> [WP1]                       // bare brackets, no node IDs
   A --> B  B --> C                      // two edges on one line
-  A[Step: detail] --> B                 // colon inside label
   flowchart LR\\n  A((R1)) A -- B  A -- C  // chained edges, no -->
 
 ================================================================
@@ -296,7 +300,6 @@ CORRECT EXAMPLE — COPY THIS SHAPE:
 WRONG examples to avoid:
   mindmap\\n  root((R)) A --> B          // arrows are forbidden in mindmap
   mindmap\\n  root((R5))  A -- B  A -- C // chained siblings + edge syntax (this is the exact bug we keep hitting)
-  mindmap\\n  root\\n    [Child: thing]  // colon inside label
 
 ================================================================
 D. sequenceDiagram  (use for: actor-to-actor message timelines)
@@ -338,7 +341,7 @@ G. SELF-CHECK (run mentally before returning the mermaid string)
 1. Is line 1 exactly one valid header keyword?
 2. If header is "mindmap": are there ZERO occurrences of "-->" or "--" edges?
 3. Does every "[" have a matching "]"? Every "("? Every "{"?
-4. Is every ":" outside of bracketed labels (only allowed in sequenceDiagram messages, classDiagram relations, and stateDiagram transitions)?
+4. Are node IDs short ASCII identifiers with labels inside shape brackets, not bare text?
 5. Is every edge / child on its own line?
 6. Are there at least 4 substantive nodes?
 If any answer is no, FIX IT before emitting.

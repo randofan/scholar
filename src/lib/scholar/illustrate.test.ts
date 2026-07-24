@@ -56,8 +56,28 @@ describe("validateMermaid", () => {
     expect(res.ok).toBe(false);
   });
 
-  it("rejects a colon inside a bracketed label", () => {
+  it("accepts a colon inside a bracketed label (confirmed safe by the mermaid corpus fidelity test)", () => {
+    // Was previously rejected on the theory that colons are reserved inside
+    // brackets; a real mermaid.render() corpus test (tests/e2e/mermaid-corpus.spec.ts)
+    // disproved that, so the validator no longer flags it.
     const res = validateMermaid(`flowchart LR\n  A[Step: detail] --> B[End]`);
+    expect(res).toEqual({ ok: true });
+  });
+
+  it("accepts a colon inside a mindmap child label", () => {
+    const res = validateMermaid(`mindmap\n  root\n    [Child: thing]`);
+    expect(res).toEqual({ ok: true });
+  });
+
+  it("accepts erDiagram crow's-foot cardinality notation without a false unbalanced-brace rejection", () => {
+    const res = validateMermaid(
+      `erDiagram\n  PAPER ||--o{ CITATION : references\n  PAPER {\n    string title\n    int year\n  }\n  CITATION {\n    string title\n    string arxivId\n  }`,
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it("still rejects genuinely unbalanced curly braces in an erDiagram entity block", () => {
+    const res = validateMermaid(`erDiagram\n  PAPER {\n    string title\n    int year`);
     expect(res.ok).toBe(false);
   });
 

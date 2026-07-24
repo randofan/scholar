@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { themes, type ThemeType } from "@/lib/mermaid/themes";
+import { renderMermaidToSvg } from "@/lib/mermaid/render";
 
 interface Props {
   source: string;
@@ -9,28 +10,8 @@ interface Props {
   onRenderError?: (message: string) => void;
 }
 
-let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
-let currentTheme: ThemeType | null = null;
-
-async function getMermaid(theme: ThemeType) {
-  if (!mermaidPromise) {
-    mermaidPromise = import("mermaid").then((m) => m.default);
-  }
-  const mermaid = await mermaidPromise;
-  if (currentTheme !== theme) {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "loose",
-      ...themes[theme].mermaidConfig,
-    });
-    currentTheme = theme;
-  }
-  return mermaid;
-}
-
 export function MermaidView({ source, theme = "linearLight", onRenderError }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`);
   const themeCfg = themes[theme];
   // Held in a ref so a new callback identity from the parent never re-triggers
   // the render effect (which would re-fire onRenderError in a loop).
@@ -39,21 +20,20 @@ export function MermaidView({ source, theme = "linearLight", onRenderError }: Pr
 
   useEffect(() => {
     let cancelled = false;
-    getMermaid(theme).then(async (mermaid) => {
-      try {
-        const { svg } = await mermaid.render(idRef.current, source);
-        if (!cancelled && ref.current) ref.current.innerHTML = svg;
-      } catch (err) {
-        // Don't render mermaid's own giant red "Syntax error" blob into the
-        // canvas — instead blank the diagram body and let the host (via
-        // onRenderError) regenerate the slide or show a contained error state.
-        if (!cancelled && ref.current) ref.current.innerHTML = "";
-        const message = err instanceof Error ? err.message : String(err);
-        if (typeof console !== "undefined") {
-          console.warn("mermaid render failed", message);
-        }
-        if (!cancelled) onRenderErrorRef.current?.(message);
+    renderMermaidToSvg(source, theme).then((result) => {
+      if (cancelled) return;
+      if (result.ok && result.svg) {
+        if (ref.current) ref.current.innerHTML = result.svg;
+        return;
       }
+      // Don't render mermaid's own giant red "Syntax error" blob into the
+      // canvas — instead blank the diagram body and let the host (via
+      // onRenderError) regenerate the slide or show a contained error state.
+      if (ref.current) ref.current.innerHTML = "";
+      if (typeof console !== "undefined") {
+        console.warn("mermaid render failed", result.error);
+      }
+      onRenderErrorRef.current?.(result.error ?? "unknown render error");
     });
     return () => {
       cancelled = true;

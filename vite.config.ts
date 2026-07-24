@@ -12,4 +12,16 @@ export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
   },
+  // tests/e2e/**/*.spec.ts are Playwright specs (run via `bunx playwright
+  // test`), not Vitest — Vitest's default include glob matches *.spec.ts
+  // too, so without this it tries to run them and fails on the incompatible
+  // `test`/`describe` globals. Cast needed because the shared plugin's
+  // `vite` option is typed as plain Vite `UserConfig`, which doesn't know
+  // about Vitest's `test` field (Vite still merges it in at runtime).
+  vite: {
+    test: {
+      exclude: ["**/node_modules/**", "**/dist/**", "tests/e2e/**"],
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any,
 });
