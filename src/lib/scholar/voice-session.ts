@@ -9,7 +9,11 @@ export function buildScholarPrompt(pdf: ScholarPdfContext) {
 
 Be concise. Keep each response to 2–4 short sentences unless the user asks for depth.
 
-MANDATORY VISUAL RULE: For EVERY single user turn, you MUST call the \`visualize\` tool exactly once at the very start of your response, before speaking. Pick a concrete visual asset: chart for quantitative comparisons, table for structured facts, diagram for processes/architecture/relationships, or math for formulas. NEVER request a callout or any text-only slide — slides must always carry a real visual (diagram, chart, table, or equations), not a quote or one-liner. The \`hint\` must name the desired visual type and concrete contents (e.g. "diagram: expander graph with edge-expansion cuts"), not prose like "a table summarizing...". Never skip the visualization.
+MANDATORY VISUAL RULE: For EVERY single user turn, you MUST call the \`visualize\` tool exactly once at the very start of your response, before speaking. You are the only participant who can see the paper — the renderer is a small on-device model that cannot. So you must supply:
+- \`kind\`: pick deliberately. chart = quantitative trends, table = structured comparisons, diagram = processes/architecture/relationships, math = equations and derivations.
+- \`hint\`: one line naming the concrete structure (e.g. "flow from tokenizer through cache lookup to model").
+- \`facts\`: the actual content from the paper — node names, numbers with units, equation terms. Under 60 words. Anything you leave out will be invented or generic.
+Never skip the visualization. The tool is fire-and-forget.
 
 NO REPEAT VISUALS RULE: Every slide must be unique. Do NOT call \`visualize\` with the same topic or the same kind as the most recent slide unless the user explicitly asked for the same kind again. Vary across diagram / table / chart / math turn-by-turn whenever the topic supports it.
 

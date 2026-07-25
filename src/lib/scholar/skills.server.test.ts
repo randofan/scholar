@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DISTILL_MODEL,
   MAX_SKILL_RULES,
-  VISUALIZE_SKILL_KEY,
+  skillKeyForKind,
   distillLessonsIntoSkill,
   invalidateSkillCache,
   loadSkillRules,
@@ -25,6 +25,8 @@ function memoryBucket(initial?: Record<string, string>) {
   return { bucket, store };
 }
 
+const DIAGRAM_KEY = skillKeyForKind("diagram");
+
 const skillFile = (rules: string[]) =>
   JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00Z", rules });
 
@@ -34,25 +36,25 @@ beforeEach(() => {
 
 describe("loadSkillRules", () => {
   it("returns [] when the bucket binding is missing", async () => {
-    expect(await loadSkillRules(undefined)).toEqual([]);
+    expect(await loadSkillRules(undefined, "diagram")).toEqual([]);
   });
 
   it("returns [] when the skill file does not exist", async () => {
     const { bucket } = memoryBucket();
-    expect(await loadSkillRules(bucket)).toEqual([]);
+    expect(await loadSkillRules(bucket, "diagram")).toEqual([]);
   });
 
   it("returns [] on a corrupt skill file instead of throwing", async () => {
-    const { bucket } = memoryBucket({ [VISUALIZE_SKILL_KEY]: "not json{" });
-    expect(await loadSkillRules(bucket)).toEqual([]);
+    const { bucket } = memoryBucket({ [DIAGRAM_KEY]: "not json{" });
+    expect(await loadSkillRules(bucket, "diagram")).toEqual([]);
   });
 
   it("loads and sanitizes rules (dedupe, trim, cap)", async () => {
     const many = Array.from({ length: 40 }, (_, i) => `rule number ${i}`);
     const { bucket } = memoryBucket({
-      [VISUALIZE_SKILL_KEY]: skillFile(["  keep this  ", "keep this", ...many]),
+      [DIAGRAM_KEY]: skillFile(["  keep this  ", "keep this", ...many]),
     });
-    const rules = await loadSkillRules(bucket);
+    const rules = await loadSkillRules(bucket, "diagram");
     expect(rules[0]).toBe("keep this");
     expect(rules.filter((r) => r === "keep this")).toHaveLength(1);
     expect(rules.length).toBeLessThanOrEqual(MAX_SKILL_RULES);
@@ -67,7 +69,7 @@ describe("distillLessonsIntoSkill", () => {
 
   it("merges via Workers AI and persists the updated file", async () => {
     const { bucket, store } = memoryBucket({
-      [VISUALIZE_SKILL_KEY]: skillFile(["Always label both chart axes with units"]),
+      [DIAGRAM_KEY]: skillFile(["Always label both chart axes with units"]),
     });
     const ai: WorkersAiLike = {
       run: vi.fn(async () => ({
@@ -80,27 +82,27 @@ describe("distillLessonsIntoSkill", () => {
       })),
     };
 
-    const rules = await distillLessonsIntoSkill(bucket, ai, lessons);
+    const rules = await distillLessonsIntoSkill(bucket, ai, lessons, "diagram");
 
     expect(ai.run).toHaveBeenCalledWith(
       DISTILL_MODEL,
       expect.objectContaining({ messages: expect.any(Array) }),
     );
     expect(rules).toContain("Balance every mermaid bracket pair before emitting");
-    const persisted = JSON.parse(store.get(VISUALIZE_SKILL_KEY)!);
+    const persisted = JSON.parse(store.get(DIAGRAM_KEY)!);
     expect(persisted.rules).toEqual(rules);
   });
 
   it("passes both current rules and new lessons to the model", async () => {
     const { bucket } = memoryBucket({
-      [VISUALIZE_SKILL_KEY]: skillFile(["Existing rule about axis labels"]),
+      [DIAGRAM_KEY]: skillFile(["Existing rule about axis labels"]),
     });
     let capturedInput: { messages?: Array<{ content: string }> } = {};
     const run = vi.fn(async (_model: string, input: Record<string, unknown>) => {
       capturedInput = input as typeof capturedInput;
       return { response: JSON.stringify({ rules: ["merged"] }) };
     });
-    await distillLessonsIntoSkill(bucket, { run }, lessons);
+    await distillLessonsIntoSkill(bucket, { run }, lessons, "diagram");
 
     const messages = capturedInput.messages ?? [];
     const userMsg = messages[messages.length - 1].content;
@@ -110,30 +112,30 @@ describe("distillLessonsIntoSkill", () => {
 
   it("falls back to a deterministic merge when Workers AI throws", async () => {
     const { bucket, store } = memoryBucket({
-      [VISUALIZE_SKILL_KEY]: skillFile(["Existing rule"]),
+      [DIAGRAM_KEY]: skillFile(["Existing rule"]),
     });
     const ai: WorkersAiLike = {
       run: vi.fn(async () => Promise.reject(new Error("model unavailable"))),
     };
 
-    const rules = await distillLessonsIntoSkill(bucket, ai, lessons);
+    const rules = await distillLessonsIntoSkill(bucket, ai, lessons, "diagram");
 
     expect(rules[0]).toBe("Existing rule");
     expect(rules).toContain("mermaid render error: Parse error on line 2");
-    expect(store.get(VISUALIZE_SKILL_KEY)).toBeTruthy();
+    expect(store.get(DIAGRAM_KEY)).toBeTruthy();
   });
 
   it("falls back to a deterministic merge when the AI response is garbage", async () => {
     const { bucket } = memoryBucket();
     const ai: WorkersAiLike = { run: vi.fn(async () => ({ response: "sorry, I cannot do that" })) };
 
-    const rules = await distillLessonsIntoSkill(bucket, ai, lessons);
+    const rules = await distillLessonsIntoSkill(bucket, ai, lessons, "diagram");
     expect(rules).toEqual(lessons.map((l) => l));
   });
 
   it("works without an AI binding at all", async () => {
     const { bucket } = memoryBucket();
-    const rules = await distillLessonsIntoSkill(bucket, undefined, lessons);
+    const rules = await distillLessonsIntoSkill(bucket, undefined, lessons, "diagram");
     expect(rules).toHaveLength(2);
   });
 
@@ -142,7 +144,7 @@ describe("distillLessonsIntoSkill", () => {
     const ai: WorkersAiLike = {
       run: vi.fn(async () => ({ response: { rules: ["object-mode rule"] } })),
     };
-    const rules = await distillLessonsIntoSkill(bucket, ai, lessons);
+    const rules = await distillLessonsIntoSkill(bucket, ai, lessons, "diagram");
     expect(rules).toEqual(["object-mode rule"]);
   });
 });
@@ -165,11 +167,11 @@ describe("mergeRulesDeterministic", () => {
 
 describe("loadSkillRulesCached", () => {
   it("caches reads within the TTL", async () => {
-    const { bucket, store } = memoryBucket({ [VISUALIZE_SKILL_KEY]: skillFile(["cached rule"]) });
-    expect(await loadSkillRulesCached(bucket)).toEqual(["cached rule"]);
-    store.set(VISUALIZE_SKILL_KEY, skillFile(["changed rule"]));
-    expect(await loadSkillRulesCached(bucket)).toEqual(["cached rule"]);
+    const { bucket, store } = memoryBucket({ [DIAGRAM_KEY]: skillFile(["cached rule"]) });
+    expect(await loadSkillRulesCached(bucket, "diagram")).toEqual(["cached rule"]);
+    store.set(DIAGRAM_KEY, skillFile(["changed rule"]));
+    expect(await loadSkillRulesCached(bucket, "diagram")).toEqual(["cached rule"]);
     invalidateSkillCache();
-    expect(await loadSkillRulesCached(bucket)).toEqual(["changed rule"]);
+    expect(await loadSkillRulesCached(bucket, "diagram")).toEqual(["changed rule"]);
   });
 });

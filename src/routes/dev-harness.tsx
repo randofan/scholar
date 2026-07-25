@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { extractPdfText } from "@/lib/scholar/pdf";
 import { useScholarStore } from "@/lib/scholar/store";
 import { buildClientTools, distillSessionLessons, type ToolHost } from "@/lib/scholar/agent-tools";
+import type { StrictKind } from "@/lib/scholar/illustrate-shared";
 import { CanvasPane } from "@/components/scholar/CanvasPane";
 import { ResearchFeed } from "@/components/scholar/ResearchFeed";
 import { Toaster } from "@/components/ui/sonner";
@@ -11,12 +12,15 @@ import { Loader2, Send, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 // Dev-only "no-voice" harness: drives the exact same client tools
-// (visualize/research) that the ElevenLabs agent calls, but from a typed
-// question instead of a live voice session. A small Groq function-calling
-// layer (text-agent.server.ts) stands in for the ElevenLabs LLM's tool-call
-// decisions. This exists purely to make the product loop testable/iterable
-// without burning ElevenLabs minutes or waiting on a live voice session —
-// it is gated out of production builds.
+// (visualize/research) the ElevenLabs agent calls, but from a form instead of
+// a live voice session.
+//
+// It dispatches tool calls DIRECTLY rather than asking a stand-in LLM to
+// decide them, because that now mirrors production: the voice agent's whole
+// job for `visualize` is to pick a `kind` and hand over `topic`/`hint`/`facts`
+// — the on-device model does the rest. Typing those four fields exercises
+// exactly the same path a real tool call takes, with no server LLM involved.
+// Gated out of production builds.
 export const Route = createFileRoute("/dev-harness")({
   component: import.meta.env.DEV ? DevHarnessPage : ProductionGuard,
   head: () => ({ meta: [{ title: "Dev harness · Multimodal Scholar" }] }),
@@ -56,7 +60,11 @@ function DevHarnessPage() {
   }, []);
 
   const [parsing, setParsing] = useState(false);
-  const [question, setQuestion] = useState("");
+  const [kind, setKind] = useState<StrictKind>("diagram");
+  const [topic, setTopic] = useState("");
+  const [hint, setHint] = useState("");
+  const [facts, setFacts] = useState("");
+  const [researchQuery, setResearchQuery] = useState("");
   const [thinking, setThinking] = useState(false);
   const [lines, setLines] = useState<TranscriptLine[]>([]);
   const lineCounterRef = useRef(0);
@@ -97,53 +105,36 @@ function DevHarnessPage() {
     }
   };
 
-  const ask = async () => {
-    const q = question.trim();
-    if (!q || !pdf) return;
-    pushLine("user", q);
-    setQuestion("");
+  const runVisualize = () => {
+    const t = topic.trim();
+    if (!t) return;
+    pushLine("user", `visualize(kind=${kind}) ${t}`);
     setThinking(true);
     try {
-      const recentVisuals = useScholarStore
-        .getState()
-        .canvasItems.filter((c) => c.status === "ready" && !!c.payload)
-        .slice(0, 6)
-        .map((c) => ({ title: c.title, kind: c.payload!.kind }));
-
-      const res = await fetch("/api/agent-turn", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, pdfExcerpt: pdf.text.slice(0, 30_000), recentVisuals }),
+      const result = tools.visualize({
+        topic: t,
+        kind,
+        hint: hint.trim() || undefined,
+        facts: facts.trim() || undefined,
       });
-      const json = (await res.json()) as {
-        ok?: boolean;
-        answer?: string;
-        toolCalls?: Array<{ name: "visualize" | "research"; args: Record<string, unknown> }>;
-        error?: string;
-      };
-      if (!json.ok) throw new Error(json.error ?? "agent turn failed");
-
-      if (json.answer) pushLine("agent", json.answer);
-      for (const call of json.toolCalls ?? []) {
-        if (call.name === "visualize") {
-          const result = tools.visualize({
-            topic: String(call.args.topic ?? q),
-            hint: call.args.hint ? String(call.args.hint) : undefined,
-          });
-          pushLine("tool", `→ visualize(${JSON.stringify(call.args)}): ${result}`);
-        } else if (call.name === "research") {
-          const scope = call.args.scope;
-          const result = tools.research({
-            query: String(call.args.query ?? q),
-            scope: scope === "web" || scope === "citations" || scope === "both" ? scope : undefined,
-          });
-          pushLine("tool", `→ research(${JSON.stringify(call.args)}): ${result}`);
-        }
-      }
+      pushLine("tool", `→ ${result}`);
     } catch (err) {
       pushLine("tool", `error: ${err instanceof Error ? err.message : "failed"}`);
     } finally {
       setThinking(false);
+    }
+  };
+
+  const runResearch = () => {
+    const q = researchQuery.trim();
+    if (!q) return;
+    pushLine("user", `research ${q}`);
+    setResearchQuery("");
+    try {
+      const result = tools.research({ query: q, scope: "both" });
+      pushLine("tool", `→ ${result}`);
+    } catch (err) {
+      pushLine("tool", `error: ${err instanceof Error ? err.message : "failed"}`);
     }
   };
 
@@ -153,7 +144,7 @@ function DevHarnessPage() {
       <header className="border-b border-border bg-card/60 px-4 py-2.5">
         <p className="text-sm font-semibold">Dev harness — no-voice product loop</p>
         <p className="text-[11px] text-muted-foreground">
-          Text stand-in for the ElevenLabs agent. Dev builds only.
+          Direct tool-call form — same path the voice agent takes. Dev builds only.
         </p>
       </header>
 
@@ -202,30 +193,77 @@ function DevHarnessPage() {
                 </p>
               ))}
             </div>
-            <div className="border-t border-border p-3 flex gap-2">
+            <div className="border-t border-border p-3 space-y-2">
+              <div className="flex gap-2">
+                <select
+                  data-testid="harness-kind-select"
+                  className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value as StrictKind)}
+                >
+                  <option value="diagram">diagram</option>
+                  <option value="chart">chart</option>
+                  <option value="table">table</option>
+                  <option value="math">math</option>
+                </select>
+                <input
+                  data-testid="harness-topic-input"
+                  className="flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                  placeholder="topic"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                />
+              </div>
               <input
-                data-testid="harness-question-input"
-                className="flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-                placeholder="Ask a question about the paper…"
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void ask();
-                }}
-                disabled={thinking}
+                data-testid="harness-hint-input"
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                placeholder="hint — the structure to draw"
+                value={hint}
+                onChange={(e) => setHint(e.target.value)}
+              />
+              <textarea
+                data-testid="harness-facts-input"
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                rows={3}
+                placeholder="facts — paper content the model should use (it cannot see the PDF)"
+                value={facts}
+                onChange={(e) => setFacts(e.target.value)}
               />
               <Button
                 size="sm"
-                data-testid="harness-ask-button"
-                onClick={() => void ask()}
-                disabled={thinking || !question.trim()}
+                className="w-full"
+                data-testid="harness-visualize-button"
+                onClick={runVisualize}
+                disabled={thinking || !topic.trim()}
               >
                 {thinking ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <Send className="h-3.5 w-3.5" />
                 )}
+                <span className="ml-1.5">visualize</span>
               </Button>
+              <div className="flex gap-2 pt-1">
+                <input
+                  data-testid="harness-research-input"
+                  className="flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                  placeholder="research query"
+                  value={researchQuery}
+                  onChange={(e) => setResearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") runResearch();
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="harness-research-button"
+                  onClick={runResearch}
+                  disabled={!researchQuery.trim()}
+                >
+                  research
+                </Button>
+              </div>
             </div>
             <div className="border-t border-border p-2">
               <Button

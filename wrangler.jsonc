@@ -4,11 +4,12 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
-  // R2 bucket holding generator skill files (create with:
-  //   wrangler r2 bucket create scholar-skills)
+  // R2 bucket holding the per-kind generator skill files, one per visual kind
+  // (skills/visualize-diagram.json, -chart.json, ...). Create with:
+  //   wrangler r2 bucket create scholar-skills
   "r2_buckets": [{ "binding": "SKILLS", "bucket_name": "scholar-skills" }],
-  // Workers AI — distills session lessons into skill updates, and serves as
-  // the free-tier failover provider for visualize when Groq is rate-limited
-  // or out of credits (see generateVisual's provider cascade).
+  // Workers AI — distills a session's failure lessons into skill-file updates.
+  // Visual generation itself no longer touches any server-side model; it runs
+  // in the browser on Chrome's built-in Gemini Nano (see on-device.ts).
   "ai": { "binding": "AI" },
 }

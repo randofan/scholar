@@ -6,7 +6,7 @@ import { createFileBucket } from "./file-bucket";
 import {
   distillLessonsIntoSkill,
   loadSkillRules,
-  VISUALIZE_SKILL_KEY,
+  skillKeyForKind,
 } from "../src/lib/scholar/skills.server";
 
 let dirs: string[] = [];
@@ -67,15 +67,20 @@ describe("createFileBucket integration with distillLessonsIntoSkill", () => {
     const dir = await scratchDir();
     const lessons = ["mermaid mindmap bodies must never contain --> arrows"];
 
-    const rules = await distillLessonsIntoSkill(createFileBucket(dir), undefined, lessons);
+    const rules = await distillLessonsIntoSkill(
+      createFileBucket(dir),
+      undefined,
+      lessons,
+      "diagram",
+    );
     expect(rules).toContain(lessons[0]);
 
     // A brand new bucket instance pointed at the same directory sees the
     // same rules — proves this is real on-disk persistence, not in-memory.
-    const reloaded = await loadSkillRules(createFileBucket(dir));
+    const reloaded = await loadSkillRules(createFileBucket(dir), "diagram");
     expect(reloaded).toEqual(rules);
 
-    const raw = JSON.parse(await readFile(path.join(dir, VISUALIZE_SKILL_KEY), "utf-8"));
+    const raw = JSON.parse(await readFile(path.join(dir, skillKeyForKind("diagram")), "utf-8"));
     expect(raw.rules).toEqual(rules);
   });
 });

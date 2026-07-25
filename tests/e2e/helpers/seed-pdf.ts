@@ -31,8 +31,9 @@ export async function seedPdfState(
   await page.evaluate((v) => {
     window.__scholarStore!.getState().setPdf({ ...v, charCount: v.text.length });
   }, value);
+  // Wait for the harness to swap from the upload prompt to the tool-call form.
   await page.waitForFunction(
-    () => !!document.querySelector('[data-testid="harness-question-input"]'),
+    () => !!document.querySelector('[data-testid="harness-topic-input"]'),
     { timeout: 5_000 },
   );
 }

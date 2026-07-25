@@ -7,7 +7,7 @@ import {
   validateAxisLabels,
   validateMermaid,
   type Visual,
-} from "../src/lib/scholar/illustrate.server";
+} from "../src/lib/scholar/illustrate-shared";
 import type { ResearchResult } from "../src/lib/scholar/research.server";
 
 export interface ScoreOutcome {

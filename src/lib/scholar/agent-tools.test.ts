@@ -4,13 +4,38 @@ import {
   deliverContextualUpdate,
   dispatchSpeculativeVisual,
   distillSessionLessons,
-  fetchIllustration,
+  generateVisualWithRetries,
   fetchResearchBriefing,
   guessSpeculativeVisualTopic,
   parseResearchResponse,
   regenerateAfterRenderFailure,
 } from "./agent-tools";
 import { useScholarStore } from "./store";
+import { __setLanguageModel, type LanguageModelLike } from "./on-device";
+
+/** Fake Prompt API returning canned model output in order (last repeats). */
+function fakeModel(responses: string[], onPrompt?: (p: string) => void): LanguageModelLike {
+  let i = 0;
+  return {
+    availability: async () => "available",
+    create: async () => ({
+      prompt: async (input: string) => {
+        onPrompt?.(input);
+        const r = responses[Math.min(i, responses.length - 1)];
+        i += 1;
+        return r;
+      },
+    }),
+  };
+}
+
+const DIAGRAM_JSON = JSON.stringify({
+  title: "Retrieval pipeline",
+  narration: "Three stages from query to ranked results.",
+  mermaid: "flowchart LR\n  Q[Query] --> R[Retrieve]\n  R --> K[Rank]\n  K --> O[Output]",
+});
+
+afterEach(() => __setLanguageModel(undefined));
 beforeEach(() => {
   const storage = new Map<string, string>();
   vi.stubGlobal("window", {
@@ -96,187 +121,149 @@ describe("research client response handling", () => {
   });
 });
 
-describe("illustrate client response handling (callout regression)", () => {
-  it("does not crash on the exact 'upstream request timeout' body that triggered the callout bug", async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response("upstream request timeout", {
-        status: 502,
-        statusText: "Bad Gateway",
-      }),
-    );
-
-    await expect(
-      fetchIllustration({ topic: "ZipServ's Key Innovations", hint: "callout" }, fetchImpl, {
-        attempts: 1,
-        retryDelayMs: 0,
-      }),
-    ).rejects.toThrow(
-      /Illustrate service returned a non-JSON response \(502 Bad Gateway\): upstream request timeout/,
-    );
+describe("generateVisualWithRetries", () => {
+  it("returns the visual on the first attempt when it passes validation", async () => {
+    __setLanguageModel(fakeModel([DIAGRAM_JSON]));
+    const { visual, warnings } = await generateVisualWithRetries("diagram", {
+      topic: "Retrieval pipeline",
+    });
+    expect(visual.kind).toBe("diagram");
+    expect(visual.diagram?.mermaid).toContain("flowchart LR");
+    expect(warnings).toEqual([]);
   });
 
-  it("retries transient non-JSON failures and returns the recovered visual", async () => {
-    const visual = {
-      title: "ZipServ's Key Innovations",
-      narration: "Three pillars of the system.",
-      kind: "callout" as const,
-      callout: { body: "Lossless. Composable. GPU-native." },
-    };
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response("upstream request timeout", { status: 502 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, visual }));
-
-    const result = await fetchIllustration({ topic: "ZipServ's Key Innovations" }, fetchImpl, {
-      attempts: 2,
-      retryDelayMs: 0,
+  it("retries with the validator's exact reason and recovers", async () => {
+    const prompts: string[] = [];
+    const broken = JSON.stringify({
+      title: "T",
+      narration: "n",
+      mermaid: "not a diagram header at all",
     });
+    __setLanguageModel(fakeModel([broken, DIAGRAM_JSON], (p) => prompts.push(p)));
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(result.visual?.kind).toBe("callout");
-    expect(result.visual?.title).toBe("ZipServ's Key Innovations");
+    const { visual, warnings } = await generateVisualWithRetries("diagram", { topic: "T" });
+
+    expect(visual.diagram?.mermaid).toContain("flowchart LR");
+    // The rejection reason is surfaced as a warning AND fed back as a correction.
+    expect(warnings).toHaveLength(1);
+    expect(prompts[1]).toContain("PREVIOUS ATTEMPT FAILED:");
+    expect(prompts[1]).toContain(warnings[0]);
+  });
+
+  it("throws after exhausting attempts, naming the last failure", async () => {
+    __setLanguageModel(
+      fakeModel([JSON.stringify({ title: "T", narration: "n", mermaid: "junk" })]),
+    );
+    await expect(
+      generateVisualWithRetries("diagram", { topic: "T" }, { maxAttempts: 3 }),
+    ).rejects.toThrow(/failed after 3 attempts \(kind=diagram\)/);
+  });
+
+  it("sends facts (not the PDF) as the model's only grounding", async () => {
+    const prompts: string[] = [];
+    __setLanguageModel(fakeModel([DIAGRAM_JSON], (p) => prompts.push(p)));
+    await generateVisualWithRetries("diagram", {
+      topic: "Retrieval pipeline",
+      hint: "query to ranked results",
+      facts: "Stage 1 retrieves 1000 candidates; stage 2 reranks to 10.",
+    });
+    expect(prompts[0]).toContain("Stage 1 retrieves 1000 candidates");
+    expect(prompts[0]).toContain("query to ranked results");
   });
 });
 
-describe("guessSpeculativeVisualTopic", () => {
-  it("derives a human-readable title from the filename", () => {
-    expect(guessSpeculativeVisualTopic("attention_is_all-you_need.pdf")).toEqual({
-      topic: "attention is all you need — architecture overview",
-      hint: "diagram: overall pipeline or system architecture",
-    });
+describe("visualize tool — on-device dispatch", () => {
+  it("uses the agent-supplied kind and renders the slide", async () => {
+    __setLanguageModel(
+      fakeModel([
+        JSON.stringify({
+          title: "Comparison",
+          narration: "Two rows.",
+          columns: ["a", "b"],
+          rows: [["1", "2"]],
+        }),
+      ]),
+    );
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "Comparison", kind: "table", facts: "a=1, b=2" });
+    await waitForMicrotasks();
+
+    const item = useScholarStore.getState().canvasItems[0];
+    expect(item.status).toBe("ready");
+    expect(item.payload?.kind).toBe("table");
+    expect(item.request?.facts).toBe("a=1, b=2");
   });
 
-  it("falls back to a generic title for an unhelpful filename", () => {
-    expect(guessSpeculativeVisualTopic(".pdf").topic).toBe("this paper — architecture overview");
+  it("defaults to diagram when the agent omits kind", async () => {
+    __setLanguageModel(fakeModel([DIAGRAM_JSON]));
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "Something" });
+    await waitForMicrotasks();
+    expect(useScholarStore.getState().canvasItems[0].payload?.kind).toBe("diagram");
+  });
+
+  it("surfaces a visible error when the on-device model is unavailable", async () => {
+    __setLanguageModel({
+      availability: async () => "unavailable",
+      create: async () => {
+        throw new Error("should not be called");
+      },
+    });
+    const sent = vi.fn();
+    const tools = buildClientTools({ sendContextualUpdate: sent });
+    tools.visualize({ topic: "Anything", kind: "diagram" });
+    await waitForMicrotasks();
+
+    const item = useScholarStore.getState().canvasItems[0];
+    expect(item.status).toBe("error");
+    expect(item.error).toMatch(/unavailable/i);
+    expect(sent.mock.calls.flat().join(" ")).toMatch(/VISUAL FAILED/);
+  });
+
+  it("reports a still-downloading model distinctly from an unsupported browser", async () => {
+    __setLanguageModel({
+      availability: async () => "downloadable",
+      create: async () => {
+        throw new Error("should not be called");
+      },
+    });
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "Anything", kind: "diagram" });
+    await waitForMicrotasks();
+    expect(useScholarStore.getState().canvasItems[0].error).toMatch(/still downloading/i);
+  });
+
+  it("records validator rejections as lessons tagged with the kind that produced them", async () => {
+    const broken = JSON.stringify({ title: "T", narration: "n", mermaid: "junk" });
+    __setLanguageModel(fakeModel([broken, DIAGRAM_JSON]));
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "T", kind: "diagram" });
+    await waitForMicrotasks();
+
+    const lessons = useScholarStore.getState().lessons;
+    expect(lessons.length).toBeGreaterThan(0);
+    expect(lessons.every((l) => l.kind === "diagram")).toBe(true);
   });
 });
 
 describe("dispatchSpeculativeVisual", () => {
-  it("fires an illustrate request for the guessed overview topic without touching the canvas", async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
-        ok: true,
-        visual: {
-          title: "Overview",
-          narration: "n",
-          kind: "diagram",
-          diagram: { mermaid: "flowchart LR\n  A --> B" },
-        },
-      }),
-    );
-
-    dispatchSpeculativeVisual(
-      "sparse-retrieval.pdf",
-      "Paper body text about sparse retrieval.",
-      fetchImpl,
-    );
+  it("warms the on-device session without touching the canvas", async () => {
+    __setLanguageModel(fakeModel([DIAGRAM_JSON]));
+    dispatchSpeculativeVisual("sparse-retrieval.pdf");
     await waitForMicrotasks();
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchImpl.mock.calls[0];
-    expect(url).toBe("/api/illustrate");
-    const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.topic).toBe("sparse retrieval — architecture overview");
-    expect(body.pdfExcerpt).toContain("sparse retrieval");
-    // Speculative pre-generation must stay invisible: no canvas item until a
-    // real visualize call happens.
+    // Warming must stay invisible — no slide until a real visualize call.
     expect(useScholarStore.getState().canvasItems).toHaveLength(0);
   });
 
-  it("does not throw when the illustrate request fails", async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new Error("network down"));
-    expect(() => dispatchSpeculativeVisual("paper.pdf", "text", fetchImpl)).not.toThrow();
-    await waitForMicrotasks();
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("visualize — two-phase teaser reveal", () => {
-  it("patches the pending canvas item's narration with a fast teaser before the full visual arrives", async () => {
-    let resolveIllustrate: (value: Response) => void = () => {};
-    const illustratePromise = new Promise<Response>((resolve) => {
-      resolveIllustrate = resolve;
+  it("does not throw when the model is unavailable", async () => {
+    __setLanguageModel({
+      availability: async () => "unavailable",
+      create: async () => {
+        throw new Error("nope");
+      },
     });
-    const fetchImpl = vi.fn<typeof fetch>((url) => {
-      if (String(url) === "/api/illustrate-teaser") {
-        return Promise.resolve(Response.json({ ok: true, teaser: "A diagram of the pipeline." }));
-      }
-      return illustratePromise;
-    });
-    vi.stubGlobal("fetch", fetchImpl);
-
-    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
-    tools.visualize({ topic: "Retrieval pipeline", hint: "diagram" });
+    expect(() => dispatchSpeculativeVisual("paper.pdf")).not.toThrow();
     await waitForMicrotasks();
-
-    const pending = useScholarStore.getState().canvasItems[0];
-    expect(pending.status).toBe("pending");
-    expect(pending.narration).toBe("A diagram of the pipeline.");
-
-    resolveIllustrate(
-      Response.json({
-        ok: true,
-        visual: {
-          title: "Retrieval pipeline",
-          narration: "Full narration",
-          kind: "diagram",
-          diagram: { mermaid: "flowchart LR\n  A --> B" },
-        },
-      }),
-    );
-    await waitForMicrotasks();
-
-    const ready = useScholarStore.getState().canvasItems[0];
-    expect(ready.status).toBe("ready");
-    expect(ready.narration).toBe("Full narration");
-  });
-
-  it("never overwrites an already-resolved slide if the teaser resolves late", async () => {
-    let resolveTeaser: (value: Response) => void = () => {};
-    const teaserPromise = new Promise<Response>((resolve) => {
-      resolveTeaser = resolve;
-    });
-    const fetchImpl = vi.fn<typeof fetch>((url) => {
-      if (String(url) === "/api/illustrate-teaser") return teaserPromise;
-      return Promise.resolve(
-        Response.json({
-          ok: true,
-          visual: {
-            title: "T",
-            narration: "Full narration",
-            kind: "diagram",
-            diagram: { mermaid: "flowchart LR\n  A --> B" },
-          },
-        }),
-      );
-    });
-    vi.stubGlobal("fetch", fetchImpl);
-
-    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
-    tools.visualize({ topic: "T" });
-    await waitForMicrotasks();
-    expect(useScholarStore.getState().canvasItems[0].status).toBe("ready");
-
-    resolveTeaser(Response.json({ ok: true, teaser: "Stale teaser" }));
-    await waitForMicrotasks();
-
-    expect(useScholarStore.getState().canvasItems[0].narration).toBe("Full narration");
-  });
-
-  it("leaves the caller-supplied hint as the narration when the teaser request fails", async () => {
-    const fetchImpl = vi.fn<typeof fetch>((url) => {
-      if (String(url) === "/api/illustrate-teaser") return Promise.reject(new Error("teaser down"));
-      return new Promise(() => {}); // main generation never resolves in this test
-    });
-    vi.stubGlobal("fetch", fetchImpl);
-
-    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
-    tools.visualize({ topic: "T", hint: "diagram: pipeline" });
-    await waitForMicrotasks();
-
-    const item = useScholarStore.getState().canvasItems[0];
-    expect(item.status).toBe("pending");
-    expect(item.narration).toBe("diagram: pipeline");
   });
 });
 
@@ -293,39 +280,54 @@ describe("regenerateAfterRenderFailure", () => {
           createdAt: Date.now(),
           status: "ready" as const,
           payload: { kind: "diagram" as const, spec: { mermaid: failingMermaid } },
-          request: { topic: "Inference pipeline", hint: "diagram" },
+          request: {
+            topic: "Inference pipeline",
+            kind: "diagram" as const,
+            hint: "diagram",
+            facts: "tokenizer feeds the model",
+          },
           renderRetries,
         },
       ],
     });
   }
 
-  it("re-requests the slide with the renderer error and failing source attached", async () => {
+  it("regenerates on-device, seeding attempt 1 with the renderer error and failing source", async () => {
     seedRenderedDiagram();
-    const fixed = {
-      title: "Inference pipeline",
-      narration: "Pipeline stages",
-      kind: "diagram" as const,
-      diagram: { mermaid: "flowchart LR\n  A[Tokenizer] --> B[Model]" },
-    };
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(Response.json({ ok: true, visual: fixed }));
-    vi.stubGlobal("fetch", fetchImpl);
+    const prompts: string[] = [];
+    __setLanguageModel(
+      fakeModel(
+        [
+          JSON.stringify({
+            title: "Inference pipeline",
+            narration: "Pipeline stages",
+            mermaid: "flowchart LR\n  A[Tokenizer] --> B[Model]",
+          }),
+        ],
+        (pr) => prompts.push(pr),
+      ),
+    );
 
     regenerateAfterRenderFailure("vis-1", "Parse error on line 2");
     expect(useScholarStore.getState().canvasItems[0].status).toBe("pending");
 
     await waitForMicrotasks();
 
-    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
-    expect(body.renderFailure).toEqual({ source: failingMermaid, error: "Parse error on line 2" });
-    expect(body.topic).toBe("Inference pipeline");
+    // The browser's own render error is fed back as the correction — our
+    // structural validator provably cannot see these failures.
+    expect(prompts[0]).toContain("PREVIOUS ATTEMPT FAILED:");
+    expect(prompts[0]).toContain("Parse error on line 2");
+    expect(prompts[0]).toContain(failingMermaid);
+    expect(prompts[0]).toContain("Inference pipeline");
+
     const item = useScholarStore.getState().canvasItems[0];
     expect(item.status).toBe("ready");
     expect(item.renderRetries).toBe(1);
-    // The failure is also recorded as a session lesson for future slides.
-    expect(useScholarStore.getState().lessons.join(" ")).toContain("Parse error on line 2");
+    // The failure is also recorded as a diagram-scoped session lesson.
+    const lessons = useScholarStore.getState().lessons;
+    expect(
+      lessons.some((l) => l.kind === "diagram" && l.text.includes("Parse error on line 2")),
+    ).toBe(true);
   });
 
   it("gives up with a visible error once the retry budget is exhausted", async () => {
@@ -346,7 +348,10 @@ describe("regenerateAfterRenderFailure", () => {
 describe("distillSessionLessons", () => {
   it("POSTs undistilled lessons to /api/skills and marks them distilled", async () => {
     useScholarStore.setState({
-      lessons: ["mindmap bodies must never contain arrows", "label chart axes with units"],
+      lessons: [
+        { kind: "diagram" as const, text: "mindmap bodies must never contain arrows" },
+        { kind: "chart" as const, text: "label chart axes with units" },
+      ],
       distilledLessonCount: 0,
     });
     const fetchImpl = vi
@@ -358,7 +363,9 @@ describe("distillSessionLessons", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe("/api/skills");
-    expect(JSON.parse(String(init?.body)).lessons).toHaveLength(2);
+    const { lessonsByKind } = JSON.parse(String(init?.body));
+    expect(lessonsByKind.diagram).toEqual(["mindmap bodies must never contain arrows"]);
+    expect(lessonsByKind.chart).toEqual(["label chart axes with units"]);
     expect(useScholarStore.getState().distilledLessonCount).toBe(2);
 
     // Idempotent: nothing new to distill → no second request.
@@ -367,7 +374,10 @@ describe("distillSessionLessons", () => {
   });
 
   it("keeps lessons undistilled when the request fails, so a later call retries", async () => {
-    useScholarStore.setState({ lessons: ["a lesson"], distilledLessonCount: 0 });
+    useScholarStore.setState({
+      lessons: [{ kind: "diagram" as const, text: "a lesson" }],
+      distilledLessonCount: 0,
+    });
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValue(

@@ -4,7 +4,7 @@
 // GEMINI_API_KEY is available to record real ones. Uses the REAL
 // pickStrictKind() so synthesized visualize payloads always match the kind
 // the code would actually request — a hand-maintained kind mapping here
-// would silently drift out of sync with illustrate.server.ts over time.
+// would silently drift out of sync with illustrate-shared.ts over time.
 //
 // This produces a starter baseline for `bun evals/run.ts --check` to compare
 // against. It is NOT a substitute for periodically recording real cassettes
@@ -17,7 +17,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { saveCassette } from "./cassette";
-import { pickStrictKind, type IllustrateInput } from "../src/lib/scholar/illustrate.server";
+import { pickStrictKind, type IllustrateInput } from "../src/lib/scholar/illustrate-shared";
 
 const EVALS_DIR = import.meta.dirname;
 const CASSETTE_DIR = path.join(EVALS_DIR, "cassettes");

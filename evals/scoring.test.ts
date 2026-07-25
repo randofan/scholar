@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { scoreResearch, scoreVisual } from "./scoring";
-import type { Visual } from "../src/lib/scholar/illustrate.server";
+import type { Visual } from "../src/lib/scholar/illustrate-shared";
 import type { ResearchResult } from "../src/lib/scholar/research.server";
 
 describe("scoreVisual", () => {

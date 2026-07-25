@@ -1,16 +1,30 @@
-// Persistent "skill file" for the visualize generator, stored in R2.
+// Persistent "skill files" for the visualize generator, stored in R2 — one
+// per visual kind.
 //
 // The loop: session lessons (validator rejections + browser render failures)
-// accumulate client-side during a voice session. When the session ends they
-// are POSTed to /api/skills, where Workers AI distills them INTO the skill
-// file — generalizing, deduping, and capping. Every subsequent /api/illustrate
-// call loads the skill file and injects its rules into the generation prompt,
-// so fixes for common failure modes persist across sessions and users.
+// accumulate client-side during a voice session, tagged with the kind that
+// produced them. When the session ends they are POSTed to /api/skills, where
+// Workers AI distills them INTO that kind's skill file — generalizing,
+// deduping, and capping. Every subsequent generation folds the matching
+// kind's rules into its system prompt (see buildSystemPrompt), so fixes for
+// common failure modes persist across sessions.
+//
+// Partitioned by kind because these rules come from validator rejections and
+// render errors, which are inherently format-specific: a mermaid bracket rule
+// is pure noise in a table prompt, and on-device generation has no token
+// budget to spare for noise.
 
 import type { R2BucketLike, WorkersAiLike } from "@/lib/cf-bindings";
+import type { StrictKind } from "./illustrate-shared";
 
-export const VISUALIZE_SKILL_KEY = "skills/visualize.json";
-export const MAX_SKILL_RULES = 25;
+/** R2 key holding the distilled rules for one visual kind. */
+export function skillKeyForKind(kind: StrictKind) {
+  return `skills/visualize-${kind}.json`;
+}
+
+// Lower than the old global cap of 25 — rules are now scoped to a single
+// format, so fewer are relevant, and the on-device input quota is tight.
+export const MAX_SKILL_RULES = 8;
 const MAX_RULE_LENGTH = 200;
 
 // Fast open-weights model on Workers AI; distillation is a small text-merging
@@ -42,11 +56,14 @@ function sanitizeRules(rules: unknown): string[] {
   return out;
 }
 
-/** Load the current skill rules from R2. Missing/corrupt file → empty list. */
-export async function loadSkillRules(bucket: R2BucketLike | undefined): Promise<string[]> {
+/** Load one kind's distilled rules from R2. Missing/corrupt file → empty list. */
+export async function loadSkillRules(
+  bucket: R2BucketLike | undefined,
+  kind: StrictKind,
+): Promise<string[]> {
   if (!bucket) return [];
   try {
-    const obj = await bucket.get(VISUALIZE_SKILL_KEY);
+    const obj = await bucket.get(skillKeyForKind(kind));
     if (!obj) return [];
     const parsed = JSON.parse(await obj.text()) as Partial<SkillFile>;
     return sanitizeRules(parsed.rules);
@@ -65,7 +82,15 @@ export function mergeRulesDeterministic(existing: string[], lessons: string[]): 
   return sanitizeRules([...existing, ...lessons]);
 }
 
-const DISTILL_SYSTEM_PROMPT = `You maintain a short rules file for an LLM that generates slide visuals (mermaid diagrams, Recharts charts, KaTeX math, tables). You receive the CURRENT RULES and a batch of NEW FAILURE LESSONS observed in a live session (validator rejections and browser render errors).
+const KIND_DESCRIPTION: Record<StrictKind, string> = {
+  diagram: "mermaid diagram sources",
+  chart: "Recharts chart specs (series data plus axis labels)",
+  math: "KaTeX equation steps",
+  table: "table column/row structures",
+};
+
+const distillSystemPrompt = (kind: StrictKind) =>
+  `You maintain a short rules file for a SMALL on-device LLM that generates ${KIND_DESCRIPTION[kind]}. You receive the CURRENT RULES and a batch of NEW FAILURE LESSONS observed in a live session (validator rejections and browser render errors) for this one format.
 
 Produce the updated rules list:
 - Merge the lessons into the rules. Generalize specifics into reusable rules (e.g. a lesson quoting one bad line becomes a rule about that syntax mistake).
@@ -108,18 +133,19 @@ export async function distillLessonsIntoSkill(
   bucket: R2BucketLike,
   ai: WorkersAiLike | undefined,
   lessons: string[],
+  kind: StrictKind,
 ): Promise<string[]> {
   const cleanLessons = sanitizeRules(lessons);
-  if (!cleanLessons.length) return loadSkillRules(bucket);
+  if (!cleanLessons.length) return loadSkillRules(bucket, kind);
 
-  const existing = await loadSkillRules(bucket);
+  const existing = await loadSkillRules(bucket, kind);
 
   let updated: string[] | null = null;
   if (ai) {
     try {
       const result = await ai.run(DISTILL_MODEL, {
         messages: [
-          { role: "system", content: DISTILL_SYSTEM_PROMPT },
+          { role: "system", content: distillSystemPrompt(kind) },
           {
             role: "user",
             content: `CURRENT RULES:\n${existing.length ? existing.map((r) => `- ${r}`).join("\n") : "(none yet)"}\n\nNEW FAILURE LESSONS:\n${cleanLessons.map((l) => `- ${l}`).join("\n")}`,
@@ -153,24 +179,29 @@ export async function distillLessonsIntoSkill(
     updatedAt: new Date().toISOString(),
     rules: updated,
   };
-  await bucket.put(VISUALIZE_SKILL_KEY, JSON.stringify(file, null, 2));
+  await bucket.put(skillKeyForKind(kind), JSON.stringify(file, null, 2));
   return updated;
 }
 
-// Per-isolate cache so /api/illustrate doesn't hit R2 on every slide.
-let skillCache: { rules: string[]; fetchedAt: number } | null = null;
+// Per-isolate, per-kind cache so a burst of slides doesn't hit R2 every time.
+const skillCache = new Map<StrictKind, { rules: string[]; fetchedAt: number }>();
 const SKILL_CACHE_TTL_MS = 60_000;
 
-export async function loadSkillRulesCached(bucket: R2BucketLike | undefined): Promise<string[]> {
+export async function loadSkillRulesCached(
+  bucket: R2BucketLike | undefined,
+  kind: StrictKind,
+): Promise<string[]> {
   if (!bucket) return [];
   const now = Date.now();
-  if (skillCache && now - skillCache.fetchedAt < SKILL_CACHE_TTL_MS) return skillCache.rules;
-  const rules = await loadSkillRules(bucket);
-  skillCache = { rules, fetchedAt: now };
+  const hit = skillCache.get(kind);
+  if (hit && now - hit.fetchedAt < SKILL_CACHE_TTL_MS) return hit.rules;
+  const rules = await loadSkillRules(bucket, kind);
+  skillCache.set(kind, { rules, fetchedAt: now });
   return rules;
 }
 
-/** Drop the cache (called after a distill run, and from tests). */
-export function invalidateSkillCache() {
-  skillCache = null;
+/** Drop the cache for one kind, or all kinds. Called after a distill run, and from tests. */
+export function invalidateSkillCache(kind?: StrictKind) {
+  if (kind) skillCache.delete(kind);
+  else skillCache.clear();
 }

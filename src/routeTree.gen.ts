@@ -13,9 +13,6 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as DevHarnessRouteImport } from './routes/dev-harness'
 import { Route as DevMermaidHarnessRouteImport } from './routes/dev-mermaid-harness'
 import { Route as SessionRouteImport } from './routes/session'
-import { Route as ApiAgentTurnRouteImport } from './routes/api/agent-turn'
-import { Route as ApiIllustrateRouteImport } from './routes/api/illustrate'
-import { Route as ApiIllustrateTeaserRouteImport } from './routes/api/illustrate-teaser'
 import { Route as ApiResearchRouteImport } from './routes/api/research'
 import { Route as ApiSkillsRouteImport } from './routes/api/skills'
 
@@ -39,21 +36,6 @@ const SessionRoute = SessionRouteImport.update({
   path: '/session',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAgentTurnRoute = ApiAgentTurnRouteImport.update({
-  id: '/api/agent-turn',
-  path: '/api/agent-turn',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiIllustrateRoute = ApiIllustrateRouteImport.update({
-  id: '/api/illustrate',
-  path: '/api/illustrate',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiIllustrateTeaserRoute = ApiIllustrateTeaserRouteImport.update({
-  id: '/api/illustrate-teaser',
-  path: '/api/illustrate-teaser',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiResearchRoute = ApiResearchRouteImport.update({
   id: '/api/research',
   path: '/api/research',
@@ -70,9 +52,6 @@ export interface FileRoutesByFullPath {
   '/dev-harness': typeof DevHarnessRoute
   '/dev-mermaid-harness': typeof DevMermaidHarnessRoute
   '/session': typeof SessionRoute
-  '/api/agent-turn': typeof ApiAgentTurnRoute
-  '/api/illustrate': typeof ApiIllustrateRoute
-  '/api/illustrate-teaser': typeof ApiIllustrateTeaserRoute
   '/api/research': typeof ApiResearchRoute
   '/api/skills': typeof ApiSkillsRoute
 }
@@ -81,9 +60,6 @@ export interface FileRoutesByTo {
   '/dev-harness': typeof DevHarnessRoute
   '/dev-mermaid-harness': typeof DevMermaidHarnessRoute
   '/session': typeof SessionRoute
-  '/api/agent-turn': typeof ApiAgentTurnRoute
-  '/api/illustrate': typeof ApiIllustrateRoute
-  '/api/illustrate-teaser': typeof ApiIllustrateTeaserRoute
   '/api/research': typeof ApiResearchRoute
   '/api/skills': typeof ApiSkillsRoute
 }
@@ -93,9 +69,6 @@ export interface FileRoutesById {
   '/dev-harness': typeof DevHarnessRoute
   '/dev-mermaid-harness': typeof DevMermaidHarnessRoute
   '/session': typeof SessionRoute
-  '/api/agent-turn': typeof ApiAgentTurnRoute
-  '/api/illustrate': typeof ApiIllustrateRoute
-  '/api/illustrate-teaser': typeof ApiIllustrateTeaserRoute
   '/api/research': typeof ApiResearchRoute
   '/api/skills': typeof ApiSkillsRoute
 }
@@ -106,9 +79,6 @@ export interface FileRouteTypes {
     | '/dev-harness'
     | '/dev-mermaid-harness'
     | '/session'
-    | '/api/agent-turn'
-    | '/api/illustrate'
-    | '/api/illustrate-teaser'
     | '/api/research'
     | '/api/skills'
   fileRoutesByTo: FileRoutesByTo
@@ -117,9 +87,6 @@ export interface FileRouteTypes {
     | '/dev-harness'
     | '/dev-mermaid-harness'
     | '/session'
-    | '/api/agent-turn'
-    | '/api/illustrate'
-    | '/api/illustrate-teaser'
     | '/api/research'
     | '/api/skills'
   id:
@@ -128,9 +95,6 @@ export interface FileRouteTypes {
     | '/dev-harness'
     | '/dev-mermaid-harness'
     | '/session'
-    | '/api/agent-turn'
-    | '/api/illustrate'
-    | '/api/illustrate-teaser'
     | '/api/research'
     | '/api/skills'
   fileRoutesById: FileRoutesById
@@ -140,9 +104,6 @@ export interface RootRouteChildren {
   DevHarnessRoute: typeof DevHarnessRoute
   DevMermaidHarnessRoute: typeof DevMermaidHarnessRoute
   SessionRoute: typeof SessionRoute
-  ApiAgentTurnRoute: typeof ApiAgentTurnRoute
-  ApiIllustrateRoute: typeof ApiIllustrateRoute
-  ApiIllustrateTeaserRoute: typeof ApiIllustrateTeaserRoute
   ApiResearchRoute: typeof ApiResearchRoute
   ApiSkillsRoute: typeof ApiSkillsRoute
 }
@@ -177,27 +138,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SessionRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/agent-turn': {
-      id: '/api/agent-turn'
-      path: '/api/agent-turn'
-      fullPath: '/api/agent-turn'
-      preLoaderRoute: typeof ApiAgentTurnRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/illustrate': {
-      id: '/api/illustrate'
-      path: '/api/illustrate'
-      fullPath: '/api/illustrate'
-      preLoaderRoute: typeof ApiIllustrateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/illustrate-teaser': {
-      id: '/api/illustrate-teaser'
-      path: '/api/illustrate-teaser'
-      fullPath: '/api/illustrate-teaser'
-      preLoaderRoute: typeof ApiIllustrateTeaserRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/research': {
       id: '/api/research'
       path: '/api/research'
@@ -220,9 +160,6 @@ const rootRouteChildren: RootRouteChildren = {
   DevHarnessRoute: DevHarnessRoute,
   DevMermaidHarnessRoute: DevMermaidHarnessRoute,
   SessionRoute: SessionRoute,
-  ApiAgentTurnRoute: ApiAgentTurnRoute,
-  ApiIllustrateRoute: ApiIllustrateRoute,
-  ApiIllustrateTeaserRoute: ApiIllustrateTeaserRoute,
   ApiResearchRoute: ApiResearchRoute,
   ApiSkillsRoute: ApiSkillsRoute,
 }

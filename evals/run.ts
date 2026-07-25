@@ -2,8 +2,14 @@
 // Offline-first eval harness for the two generation paths that make up the
 // product loop (visualize, research). Default mode replays committed
 // cassettes — zero network calls, zero API spend, fully deterministic — so
-// it's safe to run on every change. `--live` hits real providers, gated by
-// `--budget N` so it can never blow through a free tier by accident.
+// it's safe to run on every change.
+//
+// `--live` hits real providers for RESEARCH only, gated by `--budget N` so it
+// can never blow through a free tier by accident. Visualize has no live mode
+// here: it runs on-device in Chrome, which a Bun CLI cannot reach. Its
+// cassettes are replayed through the on-device code path instead (see
+// cassetteToModelResponses), which still exercises schema decoding, content
+// validation, and the retry loop — everything downstream of the model.
 //
 // Usage:
 //   bun evals/run.ts                    # replay mode (default, free)
@@ -30,7 +36,9 @@ import {
   type Cassette,
 } from "./cassette";
 import { createFileBucket } from "./file-bucket";
-import { generateVisual } from "../src/lib/scholar/illustrate.server";
+import { generateVisualWithRetries } from "../src/lib/scholar/agent-tools";
+import { pickStrictKind } from "../src/lib/scholar/illustrate-shared";
+import { __setLanguageModel, type LanguageModelLike } from "../src/lib/scholar/on-device";
 import { generateResearch, type GeminiGenerateContent } from "../src/lib/scholar/research.server";
 import { distillLessonsIntoSkill, loadSkillRules } from "../src/lib/scholar/skills.server";
 import { scoreResearch, scoreVisual } from "./scoring";
@@ -111,61 +119,93 @@ function checkBudget() {
   }
 }
 
-async function runVisualizeCase(c: VisualizeCase, skillRules: string[]): Promise<CaseResult> {
-  const cassette = await loadCassette(CASSETTE_DIR, c.id);
-  let fetchImpl;
-  if (isLive) {
-    checkBudget();
-    const real = globalThis.fetch.bind(globalThis) as typeof fetch;
-    const counted = (async (...fetchArgs: Parameters<typeof fetch>) => {
-      checkBudget();
-      callsMade += 1;
-      return real(...fetchArgs);
-    }) as typeof fetch;
-    fetchImpl = isRecord ? recordingFetch(CASSETTE_DIR, c.id, counted) : counted;
-  } else {
-    if (!cassette) {
-      return {
-        id: c.id,
-        type: "visualize",
-        pass: false,
-        skipped: "no cassette recorded — run with --live --record",
-        checks: {},
-        reasons: [],
+/**
+ * Replay a visualize cassette through the on-device code path.
+ *
+ * Visualize now runs entirely in-browser against Chrome's Gemini Nano, so
+ * there is no HTTP call to record or replay. The committed cassettes are still
+ * useful though: the payload the old provider returned is byte-for-byte the
+ * shape `session.prompt()` yields under responseConstraint, so unwrapping
+ * `choices[0].message.content` gives a faithful stand-in. That keeps the eval
+ * corpus, the scorer, and baseline.json meaningful for everything downstream
+ * of the model — schema decoding, content validation, and the retry loop —
+ * without needing a GPU or a headless Chrome in the loop.
+ */
+function cassetteToModelResponses(cassette: Cassette): string[] {
+  return cassette.entries.map((e) => {
+    try {
+      const body = JSON.parse(e.responseBody) as {
+        choices?: Array<{ message?: { content?: string } }>;
       };
+      return body.choices?.[0]?.message?.content ?? e.responseBody;
+    } catch {
+      return e.responseBody;
     }
-    fetchImpl = replayingFetch(cassette);
+  });
+}
+
+/** A fake Prompt API that serves canned responses in order (last one repeats). */
+function fakeLanguageModel(responses: string[]): LanguageModelLike {
+  let i = 0;
+  return {
+    availability: async () => "available",
+    create: async () => ({
+      prompt: async () => {
+        const r = responses[Math.min(i, responses.length - 1)];
+        i += 1;
+        if (r === undefined) throw new Error("cassette exhausted");
+        return r;
+      },
+    }),
+  };
+}
+
+async function runVisualizeCase(c: VisualizeCase, skillRules: string[]): Promise<CaseResult> {
+  if (isLive) {
+    return {
+      id: c.id,
+      type: "visualize",
+      pass: false,
+      skipped: "visualize runs on-device (Chrome only) — not reachable from a live CLI run",
+      checks: {},
+      reasons: [],
+    };
   }
 
+  const cassette = await loadCassette(CASSETTE_DIR, c.id);
+  if (!cassette) {
+    return {
+      id: c.id,
+      type: "visualize",
+      pass: false,
+      skipped: "no cassette recorded",
+      checks: {},
+      reasons: [],
+    };
+  }
+
+  __setLanguageModel(fakeLanguageModel(cassetteToModelResponses(cassette)));
+  const kind = pickStrictKind({ topic: c.topic, hint: c.hint });
   const start = Date.now();
   try {
-    const result = await generateVisual(
-      { topic: c.topic, hint: c.hint, pdfExcerpt: c.pdfExcerpt, skillRules },
-      { env: { groqApiKey: process.env.GROQ_API_KEY ?? "cassette-key" }, fetchImpl },
+    const { visual, warnings } = await generateVisualWithRetries(
+      kind,
+      { topic: c.topic, hint: c.hint, facts: c.pdfExcerpt },
+      { skillRules, maxAttempts: 2 },
     );
     const latencyMs = Date.now() - start;
-    const { checks, reasons, pass } = scoreVisual(result.visual);
+    const { checks, reasons, pass } = scoreVisual(visual);
     return {
       id: c.id,
       type: "visualize",
       pass,
-      attempts: result.attempts,
+      attempts: warnings.length + 1,
       latencyMs,
-      kind: result.visual.kind,
+      kind: visual.kind,
       checks,
       reasons,
     };
   } catch (err) {
-    if (err instanceof BudgetExceededError) {
-      return {
-        id: c.id,
-        type: "visualize",
-        pass: false,
-        skipped: err.message,
-        checks: {},
-        reasons: [],
-      };
-    }
     return {
       id: c.id,
       type: "visualize",
@@ -174,6 +214,8 @@ async function runVisualizeCase(c: VisualizeCase, skillRules: string[]): Promise
       checks: { generated: false },
       reasons: [err instanceof Error ? err.message : String(err)],
     };
+  } finally {
+    __setLanguageModel(undefined);
   }
 }
 
@@ -260,7 +302,7 @@ async function runResearchCase(c: ResearchCase): Promise<CaseResult> {
 // ---------------------------------------------------------------------------
 async function main() {
   const skillBucket = createFileBucket(SKILL_STORE_DIR);
-  const skillRules = await loadSkillRules(skillBucket);
+  const skillRules = await loadSkillRules(skillBucket, "diagram");
   if (skillRules.length > 0) {
     console.log(`Loaded ${skillRules.length} learned rule(s) from ${SKILL_STORE_DIR}`);
   }
@@ -331,7 +373,12 @@ async function main() {
       .filter((r) => r.type === "visualize" && !r.pass && !r.skipped)
       .flatMap((r) => r.reasons);
     if (failureReasons.length > 0) {
-      const rules = await distillLessonsIntoSkill(skillBucket, undefined, failureReasons);
+      const rules = await distillLessonsIntoSkill(
+        skillBucket,
+        undefined,
+        failureReasons,
+        "diagram",
+      );
       console.log(
         `Distilled ${failureReasons.length} failure reason(s) into ${SKILL_STORE_DIR} (${rules.length} total rule(s)).`,
       );

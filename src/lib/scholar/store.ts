@@ -48,8 +48,12 @@ export interface CanvasItem {
   status: "pending" | "ready" | "error";
   error?: string;
   payload?: CanvasSpec;
-  /** Original visualize request, kept so a render failure can regenerate the slide. */
-  request?: { topic: string; hint?: string };
+  /**
+   * Original visualize request, kept so a render failure can regenerate the
+   * slide. Includes `facts` because the on-device model has no other source of
+   * paper content — regenerating without it would produce a generic slide.
+   */
+  request?: { topic: string; kind?: CanvasItemKind; hint?: string; facts?: string };
   /** How many times this slide has been regenerated after a browser render failure. */
   renderRetries?: number;
 }
@@ -77,6 +81,12 @@ export interface TranscriptEntry {
   ts: number;
 }
 
+/** A generation-failure reason, tagged with the visual kind that produced it. */
+export interface Lesson {
+  kind: CanvasItemKind;
+  text: string;
+}
+
 interface PdfState {
   name: string;
   text: string;
@@ -101,12 +111,15 @@ interface ScholarState {
 
   /**
    * Session-scoped "lessons" — distilled generation-failure reasons (validator
-   * rejections, browser render errors) that get replayed into every visualize
-   * request so the generator stops repeating the same mistake. Deduped, capped.
+   * rejections, browser render errors) that get replayed into subsequent
+   * visualize requests so the generator stops repeating the same mistake.
+   * Deduped, capped, and tagged with the visual kind that produced them, since
+   * the persistent skill files are per-kind (a mermaid rule is noise in a
+   * table prompt).
    */
-  lessons: string[];
-  addLesson: (lesson: string) => void;
-  /** How many of `lessons` have already been distilled into the persistent skill file. */
+  lessons: Lesson[];
+  addLesson: (kind: CanvasItemKind, lesson: string) => void;
+  /** How many of `lessons` have already been distilled into the persistent skill files. */
   distilledLessonCount: number;
   markLessonsDistilled: (count: number) => void;
 
@@ -172,11 +185,14 @@ export const useScholarStore = create<ScholarState>()(
         set((s) => ({ transcript: [...s.transcript, entry].slice(-200) })),
 
       lessons: [],
-      addLesson: (lesson) =>
+      addLesson: (kind, lesson) =>
         set((s) => {
-          const normalized = lesson.replace(/\s+/g, " ").trim().slice(0, 200);
-          if (!normalized || s.lessons.includes(normalized)) return {};
-          return { lessons: [...s.lessons, normalized].slice(-MAX_LESSONS) };
+          const text = lesson.replace(/\s+/g, " ").trim().slice(0, 200);
+          if (!text) return {};
+          // Dedupe within a kind — the same reason from a different format is
+          // a genuinely different lesson and belongs in that kind's skill file.
+          if (s.lessons.some((l) => l.kind === kind && l.text === text)) return {};
+          return { lessons: [...s.lessons, { kind, text }].slice(-MAX_LESSONS) };
         }),
       distilledLessonCount: 0,
       markLessonsDistilled: (count) => set({ distilledLessonCount: count }),

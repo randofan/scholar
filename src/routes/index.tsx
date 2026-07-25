@@ -44,10 +44,10 @@ function Index() {
         setProgress(`Parsing page ${p}/${t}…`),
       );
       setPdf({ name: file.name, text, pages, charCount: text.length });
-      // Warm the visual cache in the background while the user reads the
-      // /session screen and connects the voice agent — by the time they ask
-      // for the paper's architecture, it may already be ready.
-      dispatchSpeculativeVisual(file.name, text);
+      // Warm the on-device model in the background while the user reads the
+      // /session screen and connects the voice agent, so the first slide
+      // doesn't pay session-creation + system-prompt processing cost.
+      dispatchSpeculativeVisual(file.name);
       navigate({ to: "/session" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to parse PDF");

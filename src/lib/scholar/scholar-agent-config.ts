@@ -12,7 +12,11 @@ export const SCHOLAR_BASE_PROMPT = `You are "Scholar", a peer-level technical re
 
 Be concise. Keep each response to 2–4 short sentences unless the user asks for depth.
 
-MANDATORY VISUAL RULE: For EVERY single user turn, you MUST call the \`visualize\` tool exactly once at the very start of your response, before speaking. Pick a concrete visual form: chart for quantitative comparisons, table for structured facts, diagram for processes/architecture/relationships, or math for formulas. Use callout ONLY for a direct quote or one-line takeaway explicitly requested by the user. The \`hint\` must name the desired visual type and concrete contents (e.g. "diagram: expander graph with edge-expansion cuts"), not prose like "a table summarizing...". Never skip the visualization. The tool is fire-and-forget.
+MANDATORY VISUAL RULE: For EVERY single user turn, you MUST call the \`visualize\` tool exactly once at the very start of your response, before speaking. You are the only participant who can see the paper — the renderer is a small on-device model that cannot. So you must supply:
+- \`kind\`: pick deliberately. chart = quantitative trends, table = structured comparisons, diagram = processes/architecture/relationships, math = equations and derivations.
+- \`hint\`: one line naming the concrete structure (e.g. "flow from tokenizer through cache lookup to model").
+- \`facts\`: the actual content from the paper — node names, numbers with units, equation terms. Under 60 words. Anything you leave out will be invented or generic.
+Never skip the visualization. The tool is fire-and-forget.
 
 NO REPEAT VISUALS RULE: Every slide must be unique. Do NOT call \`visualize\` with the same topic or the same kind as the most recent slide unless the user explicitly asked for the same kind again ("another table", "redraw"). Vary across diagram / table / chart / math turn-by-turn whenever the topic supports it.
 
@@ -35,7 +39,7 @@ export const SCHOLAR_CLIENT_TOOLS = [
     type: "client" as const,
     name: "visualize",
     description:
-      "Render a concrete chart, diagram, table, or math derivation on the user's canvas. Use callout only for an explicitly requested quote or one-line takeaway. Fire-and-forget — does NOT block the conversation. Call this at the start of EVERY response.",
+      "Render a concrete diagram, chart, table, or math derivation on the user's canvas. Fire-and-forget — does NOT block the conversation. Call this at the start of EVERY response. The renderer is a small on-device model that CANNOT see the paper, so you must supply everything it needs: pick the `kind` yourself and put the actual content in `facts`.",
     expects_response: false,
     parameters: {
       type: "object",
@@ -45,13 +49,24 @@ export const SCHOLAR_CLIENT_TOOLS = [
           description:
             "Short title of the visualization, e.g. 'Attention complexity vs sequence length'.",
         },
+        kind: {
+          type: "string",
+          enum: ["diagram", "chart", "table", "math"],
+          description:
+            "Which visual form to render. 'diagram' for processes/architecture/relationships, 'chart' for quantitative trends, 'table' for structured comparisons, 'math' for equations and derivations. Choose deliberately — this selects the renderer's format rules and cannot be changed afterwards.",
+        },
         hint: {
           type: "string",
           description:
-            "Desired visual type plus concrete contents, e.g. 'table: rows for cost, throughput, routing, cabling' or 'diagram: Spraypoint routing pipeline'. Do not pass prose like 'a table summarizing...'.",
+            "One line naming the concrete structure to draw, e.g. 'flow from tokenizer through cache lookup to model' or 'rows for cost, throughput, routing, cabling'. Not prose like 'a table summarizing...'.",
+        },
+        facts: {
+          type: "string",
+          description:
+            "The SPECIFIC content from the paper the visual should contain — node names, comparison values with units, equation terms, data points. The renderer has NO access to the paper, so anything you omit here is invented or generic. Keep it under 60 words: it is generated before you speak, so long values delay your reply.",
         },
       },
-      required: ["topic"],
+      required: ["topic", "kind"],
     },
   },
   {

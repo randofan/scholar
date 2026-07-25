@@ -1,5 +1,12 @@
 import { rankReferencesByQuery, extractReferences } from "./references";
-import type { CanvasItem, CanvasSpec } from "./store";
+import { runContentValidations, type StrictKind, type Visual } from "./illustrate-shared";
+import {
+  generateTeaserOnDevice,
+  generateVisualOnDevice,
+  isOnDeviceReady,
+  onDeviceAvailability,
+} from "./on-device";
+import type { CanvasItem, CanvasItemKind, CanvasSpec, Lesson } from "./store";
 import { useScholarStore } from "./store";
 
 export interface ToolHost {
@@ -15,7 +22,21 @@ const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(counter
 
 interface IllustrateParams {
   topic: string;
+  /** Chosen by the voice agent — selects which per-kind prompt the on-device model gets. */
+  kind?: StrictKind;
   hint?: string;
+  /**
+   * Paper content supplied by the voice agent. The on-device model cannot see
+   * the PDF, so this is the only grounding it gets.
+   */
+  facts?: string;
+}
+
+const STRICT_KINDS: StrictKind[] = ["diagram", "chart", "table", "math"];
+
+/** Trust the agent's `kind` when it sent a valid one; otherwise default to diagram. */
+function resolveKind(params: IllustrateParams): StrictKind {
+  return params.kind && STRICT_KINDS.includes(params.kind) ? params.kind : "diagram";
 }
 
 interface ResearchParams {
@@ -149,83 +170,71 @@ export async function fetchResearchBriefing(
   );
 }
 
-interface IllustrateApiResponse {
-  ok?: boolean;
-  error?: string;
-  visual?: {
-    title: string;
-    narration: string;
-    kind: CanvasSpec["kind"];
-    chart?: unknown;
-    math?: unknown;
-    diagram?: unknown;
-    table?: unknown;
-    callout?: unknown;
-  };
-  /** Validator-rejection reasons the server had to correct via retry. */
-  warnings?: string[];
+/**
+ * Generate one visual on-device, retrying with the validator's exact rejection
+ * reason fed back as a correction. Retries are affordable here in a way they
+ * never were against a metered API — no network, no rate limit, no cost — so
+ * the budget is higher than the old server loop's 2 attempts.
+ *
+ * Returns the accepted visual plus every reason rejected along the way, which
+ * become kind-scoped lessons for the persistent skill file.
+ */
+const MAX_ATTEMPTS = 5;
+
+export interface VisualRequest {
+  topic: string;
+  hint?: string;
+  facts?: string;
+  recentVisuals?: Array<{ title: string; kind: string }>;
+  correction?: string;
 }
 
-export async function fetchIllustration(
-  payload: {
-    topic: string;
-    hint?: string;
-    pdfExcerpt?: string;
-    recentVisuals?: Array<{ title: string; kind: CanvasSpec["kind"] }>;
-    renderFailure?: { source: string; error: string };
-    lessons?: string[];
-  },
-  fetchImpl: typeof fetch = fetch,
-  opts: { attempts?: number; retryDelayMs?: number } = {},
-) {
-  return postJsonWithRetry<IllustrateApiResponse>(
-    "/api/illustrate",
-    payload,
-    "Illustrate service",
-    fetchImpl,
-    opts,
-  );
-}
+export async function generateVisualWithRetries(
+  kind: StrictKind,
+  input: VisualRequest,
+  opts: { skillRules?: string[]; maxAttempts?: number } = {},
+): Promise<{ visual: Visual; warnings: string[] }> {
+  const maxAttempts = opts.maxAttempts ?? MAX_ATTEMPTS;
+  const warnings: string[] = [];
+  let correction = input.correction;
+  let lastError = "";
 
-interface TeaserApiResponse {
-  ok?: boolean;
-  error?: string;
-  teaser?: string;
-}
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const visual = await generateVisualOnDevice(kind, { ...input, correction }, opts);
+      const check = runContentValidations(visual);
+      if (check.ok) return { visual, warnings };
+      warnings.push(check.reason);
+      correction = check.reason;
+      lastError = check.reason;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      warnings.push(msg);
+      correction = msg;
+      lastError = msg;
+    }
+  }
 
-async function fetchVisualTeaser(
-  payload: { topic: string; hint?: string },
-  fetchImpl: typeof fetch = fetch,
-) {
-  return postJsonWithRetry<TeaserApiResponse>(
-    "/api/illustrate-teaser",
-    payload,
-    "Teaser service",
-    fetchImpl,
-    {
-      attempts: 1,
-    },
+  throw new Error(
+    `on-device generation failed after ${maxAttempts} attempts (kind=${kind}). Last: ${lastError}`,
   );
 }
 
 /**
- * Two-phase reveal (Phase 5d): while the real (slower, structured) visual
- * generates, patch the pending canvas card with a fast one-line preview from
- * Groq's smallest model, so the user sees something concrete within ~1s
- * instead of a bare spinner for the several seconds the full generation
- * takes. Best-effort and silent on failure — the real generation's own
- * narration overwrites this regardless, so a missing teaser just means the
- * spinner shows a beat longer.
+ * Two-phase reveal: while the real visual generates, patch the pending canvas
+ * card with a fast one-line preview so the user sees something concrete almost
+ * immediately instead of a bare spinner. Best-effort and silent on failure —
+ * the real generation's narration overwrites this regardless, so a missing
+ * teaser just means the spinner shows a beat longer.
  */
 function dispatchVisualTeaser(id: string, params: IllustrateParams) {
   void (async () => {
     try {
-      const json = await fetchVisualTeaser({ topic: params.topic, hint: params.hint });
-      if (
-        json.teaser &&
-        useScholarStore.getState().canvasItems.find((c) => c.id === id)?.status === "pending"
-      ) {
-        useScholarStore.getState().patchCanvas(id, { narration: json.teaser });
+      const teaser = await generateTeaserOnDevice({ topic: params.topic, hint: params.hint });
+      const stillPending =
+        useScholarStore.getState().canvasItems.find((c) => c.id === id)?.status === "pending";
+      if (teaser && stillPending) {
+        useScholarStore.getState().patchCanvas(id, { narration: teaser });
       }
     } catch {
       // Silent — see doc comment above.
@@ -248,7 +257,7 @@ export function deliverContextualUpdate(host: ToolHost, text: string) {
   }
 }
 
-function visualToCanvasPayload(v: NonNullable<IllustrateApiResponse["visual"]>): CanvasSpec {
+function visualToCanvasPayload(v: Visual): CanvasSpec {
   return v.kind === "chart"
     ? ({ kind: "chart", spec: v.chart } as CanvasSpec)
     : v.kind === "math"
@@ -261,16 +270,22 @@ function visualToCanvasPayload(v: NonNullable<IllustrateApiResponse["visual"]>):
 }
 
 /**
- * Distill server-side validator rejections into session lessons. Each warning
- * looks like "attempt 1 (groq strict/diagram): <specific reason>" — the reason
- * is the lesson; the attempt prefix is noise.
+ * Record this generation's validator rejections as session lessons, tagged
+ * with the kind that produced them so they land in the right per-kind skill
+ * file when the session ends.
  */
-function harvestLessons(warnings: string[] | undefined) {
+function harvestLessons(kind: StrictKind, warnings: string[] | undefined) {
   if (!warnings?.length) return;
   const { addLesson } = useScholarStore.getState();
-  for (const w of warnings) {
-    addLesson(w.replace(/^attempt \d+ \([^)]*\):\s*/i, ""));
-  }
+  for (const w of warnings) addLesson(kind, w);
+}
+
+/** Session lessons for one kind, replayed into that kind's system prompt. */
+function skillRulesForKind(kind: StrictKind): string[] {
+  return useScholarStore
+    .getState()
+    .lessons.filter((l) => l.kind === kind)
+    .map((l) => l.text);
 }
 
 function collectRecentVisuals(excludeId: string) {
@@ -295,37 +310,29 @@ export function guessSpeculativeVisualTopic(pdfName: string): { topic: string; h
 }
 
 /**
- * Speculatively pre-generates the likely first slide as soon as a PDF is
- * loaded, so its result lands in the server-side R2 visual cache (see
- * visual-cache.server.ts) before the agent ever calls `visualize`. If the
- * agent later requests a matching topic, that request is a cache hit —
- * near-instant instead of a fresh Groq/Workers AI/Gemini round trip.
- *
- * Mirrors dispatchPreemptiveResearch's fire-and-forget pattern, but nothing
- * is written to the canvas here: the user hasn't asked for a slide yet, so
- * this must stay invisible unless/until a real `visualize` call reuses it.
+ * Warm the on-device path as soon as a PDF loads: check availability and
+ * pre-create the diagram session so its ~1,600-token system prompt is already
+ * processed by the time the agent asks for the first slide. Nothing is written
+ * to the canvas — the user hasn't asked for a slide yet, so this stays
+ * invisible until a real `visualize` call benefits from the warm session.
  */
-export function dispatchSpeculativeVisual(
-  pdfName: string,
-  pdfText: string,
-  fetchImpl: typeof fetch = fetch,
-) {
-  const { topic, hint } = guessSpeculativeVisualTopic(pdfName);
-  void fetchIllustration(
-    {
-      topic,
-      hint,
-      pdfExcerpt: pdfText.slice(0, 30_000),
-      lessons: useScholarStore.getState().lessons,
-    },
-    fetchImpl,
-    { attempts: 1 },
-  ).catch((err) => {
-    console.warn(
-      "speculative visual pre-generation failed",
-      err instanceof Error ? err.message : err,
-    );
-  });
+export function dispatchSpeculativeVisual(pdfName: string) {
+  void (async () => {
+    try {
+      const availability = await onDeviceAvailability();
+      if (availability !== "available") {
+        console.warn(`on-device model not ready (${availability}); slides will fail until it is`);
+        return;
+      }
+      // Cheap throwaway generation purely to force session creation + prompt
+      // processing. Result is discarded; failures are irrelevant here.
+      const { topic, hint } = guessSpeculativeVisualTopic(pdfName);
+      await generateVisualOnDevice("diagram", { topic, hint }, { skillRules: [] });
+    } catch {
+      // Warming is best-effort; a failure just means the first real slide pays
+      // the session-creation cost itself.
+    }
+  })();
 }
 
 /**
@@ -340,8 +347,11 @@ export async function distillSessionLessons(fetchImpl: typeof fetch = fetch) {
   const { lessons, distilledLessonCount } = store();
   if (lessons.length <= distilledLessonCount) return;
 
+  const lessonsByKind: Partial<Record<CanvasItemKind, string[]>> = {};
+  for (const l of lessons) (lessonsByKind[l.kind] ??= []).push(l.text);
+
   try {
-    await postJsonWithRetry("/api/skills", { lessons }, "Skills service", fetchImpl, {
+    await postJsonWithRetry("/api/skills", { lessonsByKind }, "Skills service", fetchImpl, {
       attempts: 1,
     });
     store().markLessonsDistilled(lessons.length);
@@ -372,7 +382,10 @@ export function regenerateAfterRenderFailure(itemId: string, renderError: string
 
   const failedSource = item.payload.spec.mermaid;
   const retries = item.renderRetries ?? 0;
-  store().addLesson(`mermaid that passed validation still failed to render: ${renderError}`);
+  store().addLesson(
+    "diagram",
+    `mermaid that passed validation still failed to render: ${renderError}`,
+  );
 
   if (retries >= MAX_RENDER_RETRIES) {
     store().patchCanvas(itemId, {
@@ -386,22 +399,25 @@ export function regenerateAfterRenderFailure(itemId: string, renderError: string
 
   void (async () => {
     try {
-      const ctx = getPdfContext();
-      const json = await fetchIllustration({
-        topic: item.request?.topic ?? item.title,
-        hint: item.request?.hint,
-        pdfExcerpt: ctx.text.slice(0, 30_000),
-        recentVisuals: collectRecentVisuals(itemId),
-        renderFailure: { source: failedSource, error: renderError },
-        lessons: store().lessons,
-      });
-      if (!json.visual) throw new Error(json.error ?? "no visual");
-      harvestLessons(json.warnings);
+      const { visual, warnings } = await generateVisualWithRetries(
+        "diagram",
+        {
+          topic: item.request?.topic ?? item.title,
+          hint: item.request?.hint,
+          facts: item.request?.facts,
+          recentVisuals: collectRecentVisuals(itemId),
+          // Seed attempt 1 with the renderer's own error — the browser sees
+          // failures our structural validator provably cannot.
+          correction: `mermaid.render() rejected this source with "${renderError}". Failing source:\n${failedSource.slice(0, 600)}`,
+        },
+        { skillRules: skillRulesForKind("diagram") },
+      );
+      harvestLessons("diagram", warnings);
       store().patchCanvas(itemId, {
         status: "ready",
-        title: json.visual.title || item.title,
-        narration: json.visual.narration || item.narration,
-        payload: visualToCanvasPayload(json.visual),
+        title: visual.title || item.title,
+        narration: visual.narration || item.narration,
+        payload: visualToCanvasPayload(visual),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "regeneration failed";
@@ -418,6 +434,7 @@ export function buildClientTools(host: ToolHost) {
 
   return {
     visualize: (params: IllustrateParams) => {
+      const kind = resolveKind(params);
       const id = uid("vis");
       const item: CanvasItem = {
         id,
@@ -425,7 +442,7 @@ export function buildClientTools(host: ToolHost) {
         narration: params.hint ?? "",
         createdAt: Date.now(),
         status: "pending",
-        request: { topic: params.topic, hint: params.hint },
+        request: { topic: params.topic, kind, hint: params.hint, facts: params.facts },
       };
       store().upsertCanvas(item);
       dispatchVisualTeaser(id, params);
@@ -433,25 +450,37 @@ export function buildClientTools(host: ToolHost) {
       // Fire-and-forget — DO NOT await; tool returns immediately.
       void (async () => {
         try {
-          const ctx = getPdfContext();
-          const json = await fetchIllustration({
-            topic: params.topic,
-            hint: params.hint,
-            pdfExcerpt: ctx.text.slice(0, 30_000),
-            recentVisuals: collectRecentVisuals(id),
-            lessons: store().lessons,
-          });
-          if (!json.visual) throw new Error(json.error ?? "no visual");
-          const v = json.visual;
-          harvestLessons(json.warnings);
+          if (!(await isOnDeviceReady())) {
+            const availability = await onDeviceAvailability();
+            throw new Error(
+              availability === "downloadable" || availability === "downloading"
+                ? "Chrome's on-device model is still downloading — slides will work once it finishes."
+                : "Chrome's on-device model is unavailable in this browser.",
+            );
+          }
+
+          const { visual, warnings } = await generateVisualWithRetries(
+            kind,
+            {
+              topic: params.topic,
+              hint: params.hint,
+              facts: params.facts,
+              recentVisuals: collectRecentVisuals(id),
+            },
+            { skillRules: skillRulesForKind(kind) },
+          );
+          harvestLessons(kind, warnings);
 
           store().patchCanvas(id, {
             status: "ready",
-            title: v.title || params.topic,
-            narration: v.narration || params.hint || "",
-            payload: visualToCanvasPayload(v),
+            title: visual.title || params.topic,
+            narration: visual.narration || params.hint || "",
+            payload: visualToCanvasPayload(visual),
           });
-          deliverContextualUpdate(host, `[VISUAL READY on canvas: "${v.title}" — ${v.narration}]`);
+          deliverContextualUpdate(
+            host,
+            `[VISUAL READY on canvas: "${visual.title}" — ${visual.narration}]`,
+          );
         } catch (err) {
           const msg = err instanceof Error ? err.message : "failed";
           store().patchCanvas(id, { status: "error", error: msg });
@@ -459,7 +488,7 @@ export function buildClientTools(host: ToolHost) {
         }
       })();
 
-      return `Visualization "${params.topic}" queued. Keep talking; it will appear on the canvas in a few seconds.`;
+      return `Visualization "${params.topic}" queued. Keep talking; it will appear on the canvas shortly.`;
     },
 
     research: (params: ResearchParams) => {

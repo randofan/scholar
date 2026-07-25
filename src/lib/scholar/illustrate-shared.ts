@@ -1,7 +1,11 @@
+// Pure, isomorphic half of the visualize pipeline: schemas, validators, and
+// prompt text. Deliberately imports NOTHING provider-specific (no
+// @google/genai, no Groq, no Cloudflare bindings) so it can be imported from
+// browser code — the on-device Gemini Nano path in on-device.ts needs
+// the same validation and JSON Schemas the server path used, and pulling
+// illustrate.server.ts into the client bundle would drag a server SDK with it.
+
 import { z } from "zod";
-import { GoogleGenAI, Type } from "@google/genai";
-import { GROQ_BASE_URL, GROQ_MODELS } from "@/lib/ai-gateway";
-import { getCfBindings, type WorkersAiLike } from "@/lib/cf-bindings";
 
 const ChartSpec = z.object({
   chartType: z.enum(["line", "bar", "area", "scatter"]),
@@ -250,7 +254,7 @@ export function validateVisual(v: Visual): { ok: true } | { ok: false; reason: s
   return { ok: true };
 }
 
-const MERMAID_DIAGRAM_GUIDE = `MERMAID DIAGRAM SKILL — invalid mermaid is the #1 failure mode. Read every rule. Self-check before emitting.
+export const MERMAID_DIAGRAM_GUIDE = `MERMAID DIAGRAM SKILL — invalid mermaid is the #1 failure mode. Read every rule. Self-check before emitting.
 
 ================================================================
 A. GLOBAL RULES (apply to ALL diagram types)
@@ -494,37 +498,10 @@ export function detectRequestedKind(input: IllustrateInput): Visual["kind"] | nu
   return null;
 }
 
-// NOTE: Previous revisions defined `createFallbackVisual` / `hasRngContext` and
-// returned hard-coded RNG / fat-tree / expander slides whenever the upstream
-// model failed. That violated the "no hard-coded API workarounds" rule — it
-// looked like the model was answering, when really we were serving canned
-// content from regex matches on the prompt. The entire fallback family has
-// been removed. If generation fails, `generateVisual` throws and the caller
-// surfaces the error.
+/** The four kinds we actually generate. `callout` is never produced — no text-only slides. */
+export type StrictKind = "diagram" | "table" | "math" | "chart";
 
-export function isBillingOrCreditError(err: unknown) {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /\b402\b|payment required|billing|credits? exhausted|insufficient credits|add credits/i.test(
-    msg,
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Groq strict structured outputs path
-//
-// Groq's openai/gpt-oss-20b model supports response_format=json_schema with
-// strict: true, which uses constrained decoding to GUARANTEE schema-valid JSON.
-// We pre-select the visual kind from the request so the schema is a single
-// concrete object (strict mode forbids optional fields / additionalProperties),
-// and we stop burning retries on malformed JSON.
-// ---------------------------------------------------------------------------
-
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
-
-type StrictKind = "diagram" | "table" | "math" | "chart";
-
-// JSON Schemas built for strict mode (all fields required, additionalProperties: false).
-const STRICT_KIND_SCHEMAS: Record<StrictKind, Record<string, unknown>> = {
+export const STRICT_KIND_SCHEMAS: Record<StrictKind, Record<string, unknown>> = {
   diagram: {
     type: "object",
     properties: {
@@ -634,7 +611,7 @@ interface StrictChartPayload {
   series: Array<{ name: string; points: Array<{ x: string; y: number }> }>;
 }
 
-function strictPayloadToVisual(kind: StrictKind, payload: unknown): Visual {
+export function strictPayloadToVisual(kind: StrictKind, payload: unknown): Visual {
   const p = payload as Record<string, unknown>;
   const title = String(p.title ?? "").slice(0, 80);
   const narration = String(p.narration ?? "");
@@ -697,50 +674,78 @@ function strictPayloadToVisual(kind: StrictKind, payload: unknown): Visual {
   };
 }
 
-const STRICT_SYSTEM_PROMPT = `You are a scientific visualization generator for a live research-companion slide deck. Each turn you produce ONE slide that makes the user smarter about the paper. Bias hard toward STRUCTURED, INFORMATION-DENSE visuals — never a bare restatement of the topic.
+// ---------------------------------------------------------------------------
+// Per-kind system prompts.
+//
+// These are sized for an on-device model (Chrome's Gemini Nano) with a hard
+// input quota of a few thousand tokens, so a monolithic prompt carrying every
+// format's rules is not affordable. Each kind gets ONLY the preamble plus its
+// own format skill: a table request never pays for the 1,400-token mermaid
+// guide, and a diagram request never pays for the KaTeX rules. Compose with
+// buildSystemPrompt() so kind-scoped learned rules land in the same place.
+// ---------------------------------------------------------------------------
 
-The "kind" of slide has been pre-selected by the caller; fill the schema for that kind with concrete, substantive content.
+const COMMON_PREAMBLE = `You generate ONE slide for a live research-companion deck. Output must be structured and information-dense — never a restatement of the title.
 
-NO-HEDGE RULE (CRITICAL):
-- NEVER write text like "the paper does not provide", "no explicit equations", "not enough information", "the text does not contain", "insufficient detail", or any meta-commentary about the paper's contents.
-- If the paper excerpt lacks specifics, fall back to CANONICAL TEXTBOOK KNOWLEDGE of the topic (standard definitions, well-known equations, classical diagrams) and produce the visual from that. Note "illustrative" in the narration if needed, but DELIVER the visualization.
-- Narration MUST describe concrete on-screen content. Never start narration with "Diagram:", "Chart:", "A summary of", "Overview of", or similar meta-labels.
+NO-HEDGE RULE (CRITICAL): NEVER write "the paper does not provide", "not enough information", "insufficient detail", or any meta-commentary about the source. If the supplied facts lack specifics, use CANONICAL TEXTBOOK KNOWLEDGE of the topic and deliver the visual anyway.
 
-QUALITY BAR:
-- Add information beyond restating the title.
-- Plural topics enumerate the actual items with substance.
-- "narration" ≤20 words, references concrete content.
-- "title" ≤60 chars, specific.
+QUALITY BAR: add information beyond the title; enumerate real items; "narration" is ≤20 words describing concrete on-screen content (never starts with "Diagram:", "Chart:", "Overview of"); "title" is ≤60 chars and specific.
 
-JSON OUTPUT DISCIPLINE (CRITICAL — prevents validation failures):
-- Keep every string TIGHT. Long strings full of backslashes blow past the token budget and produce truncated JSON that fails strict validation.
-- Inside JSON strings, every backslash MUST be written as \\\\ (two source chars → one decoded backslash). Newlines MUST be written as \\n. No raw control characters in string values.
+RETRY CONTRACT: if the user message contains "PREVIOUS ATTEMPT FAILED:", that line names the exact rule a validator caught. Fix ONLY that problem — do not regenerate from scratch.`;
 
-${MERMAID_DIAGRAM_GUIDE}
+const TABLE_SKILL = `TABLE SKILL: 3-6 columns, 3-8 rows of substantive content. Every row MUST have exactly the same number of cells as the columns array. Cells are short values or phrases, not sentences.`;
 
-TABLE SHAPE (when kind=table): 3-6 columns, 3-8 rows of substantive content. Every row MUST have exactly the same number of cells as the columns array.
-
-MATH SHAPE (when kind=math) — KATEX SKILL (study carefully):
-- 3-5 steps MAXIMUM. Each step is ONE focused KaTeX expression, NOT a paragraph.
-- Use proper LaTeX commands with backslashes: \\\\frac{a}{b}, \\\\sum_{i=1}^{n}, \\\\min_{x \\\\in S}, \\\\sqrt{x}, \\\\le, \\\\ge, \\\\approx, \\\\in, \\\\subseteq, \\\\setminus, \\\\cdot, \\\\lambda, \\\\alpha, \\\\bar{S}, \\\\mathbb{R}, \\\\mathcal{O}.
-- Subscripts/superscripts use braces: x_{i}, n^{2}, \\\\lambda_{2}(G).
-- Prefer PURE mathematical notation. AVOID \\\\text{...} blocks for prose — put English explanations in "narration" or the "inline" caption, NEVER inline inside the equations.
-- Every command needs its backslashes: \\\\frac (not "frac"), \\\\setminus (not "setminus"), \\\\bar{S} (not "bar S").
-- NO $ delimiters around expressions.
-- "inline" is a short plain-English caption (or empty string), NOT more math.
-- GOOD example (Cheeger constant), three steps:
-    "h(G) = \\\\min_{S \\\\subseteq V,\\\\, 0 < |S| \\\\le |V|/2} \\\\frac{|E(S, \\\\bar{S})|}{|S|}"
-    "\\\\lambda_{2}(G) \\\\le 2\\\\, h(G)"
-    "h(G) \\\\ge \\\\frac{\\\\lambda_{2}(G)}{2}"
-- BAD example (DO NOT emit): "\\\\text{For a }d\\\\text{-regular graph: }h(G) \\\\ge d - 2\\\\sqrt{d-1}" — strip the \\\\text wrappers, move prose to narration, keep step as "h(G) \\\\ge d - 2\\\\sqrt{d - 1}".
-
-CHART SHAPE (when kind=chart):
+const CHART_SKILL = `CHART SKILL:
 - 8-15 realistic illustrative points per series.
-- "xLabel" and "yLabel" are MANDATORY, non-empty, descriptive strings (e.g. "Sequence length (tokens)", "Latency (ms)"). NEVER leave them blank, NEVER use generic placeholders like "X" or "Y" or "value". Include units when applicable.
-- A single generic word (e.g. "Latency" alone) is NOT enough — pair it with a unit or a second descriptive word: "Latency (ms)", "Model size (params)", "Training steps".
-- The chart MUST be readable as a standalone figure: a viewer should understand what each axis measures from the labels alone.
-- GOOD axis labels: "Sequence length (tokens)", "Throughput (req/s)", "Training loss", "Model size (params)".
-- BAD axis labels (DO NOT emit): "X", "Y", "Value", "Axis", "Metric", "Data" — these are placeholders, not descriptions.`;
+- "xLabel" and "yLabel" are MANDATORY and descriptive. Include units where applicable.
+- A single generic word ("Latency") is NOT enough — pair it with a unit or a second word: "Latency (ms)", "Model size (params)", "Training steps".
+- The chart must be readable standalone: the axes alone should say what is measured.
+- GOOD: "Sequence length (tokens)", "Throughput (req/s)", "Training loss".
+- BAD (never emit): "X", "Y", "Value", "Axis", "Metric", "Data".`;
+
+const MATH_SKILL = `KATEX SKILL:
+- 3-5 steps MAXIMUM. Each step is ONE focused KaTeX expression, not a paragraph.
+- Inside JSON strings every backslash is written \\\\ and newlines as \\n. No raw control characters.
+- Use real commands: \\\\frac{a}{b}, \\\\sum_{i=1}^{n}, \\\\min_{x \\\\in S}, \\\\sqrt{x}, \\\\le, \\\\approx, \\\\subseteq, \\\\cdot, \\\\lambda, \\\\bar{S}, \\\\mathcal{O}.
+- Subscripts/superscripts use braces: x_{i}, n^{2}, \\\\lambda_{2}(G).
+- PURE notation only. Never use \\\\text{...} for prose — English belongs in "narration" or "inline".
+- No $ delimiters. "inline" is a short plain-English caption or empty, never more math.
+- GOOD (Cheeger constant): "h(G) = \\\\min_{S \\\\subseteq V} \\\\frac{|E(S, \\\\bar{S})|}{|S|}" then "\\\\lambda_{2}(G) \\\\le 2\\\\, h(G)".
+- BAD: "\\\\text{For a }d\\\\text{-regular graph: }h(G) \\\\ge d" — strip \\\\text, move prose to narration.`;
+
+/** The format-specific half of each system prompt. Diagram carries the full mermaid guide; the others are far smaller. */
+export const FORMAT_SKILL_BY_KIND: Record<StrictKind, string> = {
+  diagram: MERMAID_DIAGRAM_GUIDE,
+  table: TABLE_SKILL,
+  chart: CHART_SKILL,
+  math: MATH_SKILL,
+};
+
+/** Base system prompt per kind, before any learned rules are appended. */
+export const SYSTEM_PROMPT_BY_KIND: Record<StrictKind, string> = {
+  diagram: `${COMMON_PREAMBLE}\n\n${FORMAT_SKILL_BY_KIND.diagram}`,
+  table: `${COMMON_PREAMBLE}\n\n${FORMAT_SKILL_BY_KIND.table}`,
+  chart: `${COMMON_PREAMBLE}\n\n${FORMAT_SKILL_BY_KIND.chart}`,
+  math: `${COMMON_PREAMBLE}\n\n${FORMAT_SKILL_BY_KIND.math}`,
+};
+
+/**
+ * System prompt for one kind, with that kind's distilled learned rules folded
+ * in. Rules are kind-scoped (see skills.server.ts) because they come from
+ * validator rejections and render errors, which are inherently format-specific
+ * — a mermaid bracket rule is noise in a table prompt.
+ */
+export function buildSystemPrompt(kind: StrictKind, skillRules: string[] = []): string {
+  const base = SYSTEM_PROMPT_BY_KIND[kind];
+  const rules = skillRules
+    .map((r) => r.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  if (rules.length === 0) return base;
+  return `${base}\n\nLEARNED RULES (from past failures on this exact format — follow ALL):\n${rules
+    .map((r) => `- ${r.slice(0, 200)}`)
+    .join("\n")}`;
+}
 
 /** Pick the concrete kind to ask the strict-output model for. Never callout. */
 export function pickStrictKind(input: IllustrateInput): StrictKind {
@@ -754,457 +759,4 @@ export function pickStrictKind(input: IllustrateInput): StrictKind {
   if (/\b(equation|formula|derivation|theorem|complexity)\b/i.test(text)) return "math";
   if (/\b(trend|plot|chart|curve|histogram)\b/i.test(text)) return "chart";
   return "diagram";
-}
-
-/** Shared user-turn prompt across every provider — keeps the three generators in lockstep. */
-function buildStrictUserPrompt(
-  input: IllustrateInput,
-  kind: StrictKind,
-  opts: { recentBlock?: string; correction?: string },
-): string {
-  return `Topic: ${input.topic}
-${input.hint ? `Hint: ${input.hint}\n` : ""}${input.pdfExcerpt ? `Paper context (excerpt):\n${input.pdfExcerpt.slice(0, 8000)}\n` : ""}${opts.recentBlock ?? ""}
-Kind pre-selected by caller: ${kind}.
-Produce the JSON object for this kind with concrete, information-dense content.${opts.correction ?? ""}`;
-}
-
-/**
- * Call Groq's strict structured-output endpoint once. Returns whatever Visual
- * the schema-constrained decode produced — transport/parse failures throw,
- * but content-level correctness (valid mermaid, real axis labels, no hedging)
- * is NOT checked here. That's the retry loop's job via `runContentValidations`.
- */
-export async function generateVisualGroqStrict(
-  input: IllustrateInput,
-  opts: {
-    apiKey: string;
-    kind?: StrictKind;
-    model?: string;
-    fetchImpl?: FetchLike;
-    recentBlock?: string;
-    correction?: string;
-    temperature?: number;
-  },
-): Promise<Visual> {
-  const kind = opts.kind ?? pickStrictKind(input);
-  const schema = STRICT_KIND_SCHEMAS[kind];
-  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch.bind(globalThis) as FetchLike);
-  const model = opts.model ?? GROQ_MODELS.structured;
-  const temperature = opts.temperature ?? 0.5;
-  const userPrompt = buildStrictUserPrompt(input, kind, opts);
-
-  const body = {
-    model,
-    messages: [
-      { role: "system", content: STRICT_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: `visual_${kind}`,
-        strict: true,
-        schema,
-      },
-    },
-    temperature,
-    // Default Groq max_tokens is small (~1024) and routinely truncates
-    // math/diagram strings full of backslashes, which then fail strict-mode
-    // JSON validation with an empty `failed_generation`. Give the model
-    // headroom for fully-escaped KaTeX and multi-line mermaid sources.
-    max_tokens: 8192,
-  };
-
-  const res = await fetchImpl(`${GROQ_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${opts.apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Groq strict call failed: ${res.status} ${res.statusText} ${text.slice(0, 400)}`,
-    );
-  }
-  const json = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const content = json.choices?.[0]?.message?.content ?? "";
-  if (!content) throw new Error("Groq strict call returned empty content");
-  let payload: unknown;
-  try {
-    payload = JSON.parse(content);
-  } catch (err) {
-    throw new Error(
-      `Groq strict call returned non-JSON content despite strict mode: ${(err as Error).message}. Content head: ${content.slice(0, 200)}`,
-    );
-  }
-  return strictPayloadToVisual(kind, payload);
-}
-
-const TEASER_SYSTEM_PROMPT = `You write one short teaser sentence (under 14 words) previewing a visual that's about to be generated for a live voice-tutoring session. Describe concretely what the viewer is about to see (e.g. "A flowchart of the three-stage retrieval pipeline"). No quotes, no trailing filler like "Generating..." or "Loading...", just the preview itself.`;
-
-/**
- * Fast, best-effort one-liner previewing a visual before the real
- * (slower, structured) generation finishes — see Phase 5d's two-phase
- * reveal in agent-tools.ts. Uses Groq's fastest model with no retries and
- * no structured-output constraints: any failure here should never block or
- * delay the real visual, so callers are expected to swallow errors.
- */
-export async function generateVisualTeaser(
-  input: { topic: string; hint?: string },
-  opts: { apiKey: string; model?: string; fetchImpl?: FetchLike },
-): Promise<string> {
-  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch.bind(globalThis) as FetchLike);
-  const model = opts.model ?? GROQ_MODELS.fast;
-
-  const res = await fetchImpl(`${GROQ_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${opts.apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: TEASER_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `Topic: ${input.topic}${input.hint ? `\nHint: ${input.hint}` : ""}`,
-        },
-      ],
-      temperature: 0.4,
-      max_tokens: 40,
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Groq teaser call failed: ${res.status} ${res.statusText} ${text.slice(0, 200)}`,
-    );
-  }
-  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const content = (json.choices?.[0]?.message?.content ?? "").trim().replace(/^"|"$/g, "");
-  if (!content) throw new Error("Groq teaser call returned empty content");
-  return content.slice(0, 200);
-}
-
-// Fast open-weights model on Workers AI with JSON-schema support — the
-// free-tier failover when Groq is rate-limited or out of credits.
-export const WORKERS_AI_VISUALIZE_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-
-function extractWorkersAiContent(result: unknown): string | null {
-  if (result && typeof result === "object" && "response" in result) {
-    const r = (result as { response: unknown }).response;
-    if (typeof r === "string") return r;
-    if (r && typeof r === "object") return JSON.stringify(r);
-  }
-  if (typeof result === "string") return result;
-  return null;
-}
-
-/** Second-hop failover: Cloudflare Workers AI, via the native env.AI binding. */
-export async function generateVisualWorkersAI(
-  input: IllustrateInput,
-  opts: {
-    ai: WorkersAiLike;
-    kind: StrictKind;
-    model?: string;
-    recentBlock?: string;
-    correction?: string;
-  },
-): Promise<Visual> {
-  const kind = opts.kind;
-  const schema = STRICT_KIND_SCHEMAS[kind];
-  const model = opts.model ?? WORKERS_AI_VISUALIZE_MODEL;
-  const userPrompt = buildStrictUserPrompt(input, kind, opts);
-
-  const result = await opts.ai.run(model, {
-    messages: [
-      { role: "system", content: STRICT_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: { name: `visual_${kind}`, strict: true, schema },
-    },
-    max_tokens: 4096,
-  });
-
-  const content = extractWorkersAiContent(result);
-  if (!content) throw new Error("Workers AI returned empty content");
-  let payload: unknown;
-  try {
-    payload = JSON.parse(content);
-  } catch (err) {
-    throw new Error(
-      `Workers AI returned non-JSON content: ${(err as Error).message}. Content head: ${content.slice(0, 200)}`,
-    );
-  }
-  return strictPayloadToVisual(kind, payload);
-}
-
-// Third-hop failover: Gemini, structured output via @google/genai.
-export const GEMINI_VISUALIZE_MODEL = "gemini-3.1-flash-lite";
-
-/** Minimal contract for the Gemini call — lets tests inject a mock without instantiating the real client. */
-export type GeminiGenerateContentFn = (args: {
-  model: string;
-  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
-  config: Record<string, unknown>;
-}) => Promise<{ text?: string }>;
-
-function defaultGeminiVisualizeImpl(apiKey: string): GeminiGenerateContentFn {
-  const ai = new GoogleGenAI({ apiKey });
-  return (args) => ai.models.generateContent(args);
-}
-
-/**
- * STRICT_KIND_SCHEMAS are plain JSON Schema; Gemini's structured-output API
- * wants its own Type enum instead of JSON Schema type strings. This walks
- * the schema recursively so the three provider schemas can never drift out
- * of sync with each other — there is exactly one schema per kind, not three.
- */
-function toGeminiSchema(schema: Record<string, unknown>): Record<string, unknown> {
-  const type = schema.type;
-  if (type === "object") {
-    const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
-    const out: Record<string, unknown> = {
-      type: Type.OBJECT,
-      properties: Object.fromEntries(
-        Object.entries(properties).map(([k, v]) => [k, toGeminiSchema(v)]),
-      ),
-    };
-    if (Array.isArray(schema.required)) out.required = schema.required;
-    return out;
-  }
-  if (type === "array") {
-    const items = (schema.items ?? { type: "string" }) as Record<string, unknown>;
-    return { type: Type.ARRAY, items: toGeminiSchema(items) };
-  }
-  if (type === "number") return { type: Type.NUMBER };
-  if (type === "string") {
-    const out: Record<string, unknown> = { type: Type.STRING };
-    if (Array.isArray(schema.enum)) out.enum = schema.enum;
-    return out;
-  }
-  return { type: Type.STRING };
-}
-
-export async function generateVisualGemini(
-  input: IllustrateInput,
-  opts: {
-    apiKey: string;
-    kind: StrictKind;
-    model?: string;
-    recentBlock?: string;
-    correction?: string;
-    generateContentImpl?: GeminiGenerateContentFn;
-  },
-): Promise<Visual> {
-  const kind = opts.kind;
-  const schema = toGeminiSchema(STRICT_KIND_SCHEMAS[kind]);
-  const model = opts.model ?? GEMINI_VISUALIZE_MODEL;
-  const generateContent = opts.generateContentImpl ?? defaultGeminiVisualizeImpl(opts.apiKey);
-  const userPrompt = buildStrictUserPrompt(input, kind, opts);
-
-  const { text } = await generateContent({
-    model,
-    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-    config: {
-      systemInstruction: STRICT_SYSTEM_PROMPT,
-      responseMimeType: "application/json",
-      responseSchema: schema,
-      thinkingConfig: { thinkingLevel: "low" },
-    },
-  });
-
-  if (!text) throw new Error("Gemini returned empty content");
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text);
-  } catch (err) {
-    throw new Error(
-      `Gemini returned non-JSON content: ${(err as Error).message}. Content head: ${text.slice(0, 200)}`,
-    );
-  }
-  return strictPayloadToVisual(kind, payload);
-}
-
-function isRateLimitError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /\b429\b|rate.?limit|too many requests|RESOURCE_EXHAUSTED|quota exceeded/i.test(msg);
-}
-
-// Temperature ladder for Groq strict-mode retries. Groq only has one
-// structured-output-capable model (openai/gpt-oss-20b), so instead of
-// escalating models on retry, we escalate down toward
-// more deterministic output — keeping `strict: true` on every attempt.
-const GROQ_STRICT_TEMPERATURES = [0.5, 0.2, 0.0];
-
-export interface VisualizeEnv {
-  groqApiKey?: string;
-  workersAi?: WorkersAiLike;
-  geminiApiKey?: string;
-}
-
-interface VisualizeProviderSpec {
-  label: string;
-  maxAttempts: number;
-  attempt: (ctx: { attempt: number; correction: string }) => Promise<Visual>;
-}
-
-/**
- * Generate a visual, cascading Groq -> Cloudflare Workers AI -> Gemini when a
- * provider is rate-limited or out of credits (all three are free-tier
- * options — this is purely about resilience, not quality preference). Within
- * a single provider, a content-quality failure (invalid mermaid, missing
- * axis labels, hedge language) retries that SAME provider with the specific
- * failure reason injected as a correction — cascading to the next provider
- * is reserved for availability failures, since a fresh provider can't fix a
- * prompt-following problem any better than a retry can.
- */
-export async function generateVisual(
-  input: IllustrateInput,
-  opts: {
-    env?: VisualizeEnv;
-    maxAttempts?: number;
-    fetchImpl?: FetchLike;
-    generateContentImpl?: GeminiGenerateContentFn;
-  } = {},
-): Promise<IllustrateResult> {
-  const env: VisualizeEnv = opts.env ?? {
-    groqApiKey: process.env.GROQ_API_KEY,
-    workersAi: getCfBindings().AI,
-    geminiApiKey: process.env.GEMINI_API_KEY,
-  };
-
-  const maxAttemptsPerProvider = opts.maxAttempts ?? 2;
-  const kind = pickStrictKind(input);
-  const warnings: string[] = [];
-
-  // A browser-side mermaid.render() failure from a prior generation seeds the
-  // correction block, so the very first attempt already knows the exact
-  // renderer error and the source that caused it.
-  let lastError = input.renderFailure
-    ? `the previously generated mermaid source failed in the browser renderer with "${input.renderFailure.error.slice(0, 300)}". The failing source was:\n${input.renderFailure.source.slice(0, 1200)}\nFix that exact syntax problem.`
-    : "";
-
-  const recent = (input.recentVisuals ?? []).slice(0, 6);
-  const recentBlock = recent.length
-    ? `\nSlides already on the canvas (newest first) — DO NOT repeat any of these titles, and pick a DIFFERENT "kind" than the most recent one unless the user explicitly asked for the same kind:\n${recent
-        .map((r, i) => `${i + 1}. ${r.kind}: ${r.title}`)
-        .join("\n")}\n`
-    : "";
-
-  const lessons = (input.lessons ?? []).slice(0, 8);
-  const lessonsBlock = lessons.length
-    ? `\nKNOWN FAILURE MODES from earlier in this session — do NOT repeat these mistakes:\n${lessons.map((l) => `- ${l.slice(0, 200)}`).join("\n")}\n`
-    : "";
-
-  const skillRules = (input.skillRules ?? []).slice(0, 25);
-  const skillBlock = skillRules.length
-    ? `\nLEARNED RULES (distilled from failures in past sessions — follow ALL of these):\n${skillRules.map((r) => `- ${r.slice(0, 200)}`).join("\n")}\n`
-    : "";
-  const sharedRecentBlock = `${recentBlock}${skillBlock}${lessonsBlock}`;
-
-  const providers: VisualizeProviderSpec[] = [];
-  if (env.groqApiKey) {
-    providers.push({
-      label: "Groq strict mode",
-      maxAttempts: maxAttemptsPerProvider,
-      attempt: ({ attempt, correction }) =>
-        generateVisualGroqStrict(input, {
-          apiKey: env.groqApiKey!,
-          kind,
-          fetchImpl: opts.fetchImpl,
-          recentBlock: sharedRecentBlock,
-          correction,
-          temperature:
-            GROQ_STRICT_TEMPERATURES[Math.min(attempt - 1, GROQ_STRICT_TEMPERATURES.length - 1)],
-        }),
-    });
-  }
-  if (env.workersAi) {
-    providers.push({
-      label: "Workers AI",
-      maxAttempts: maxAttemptsPerProvider,
-      attempt: ({ correction }) =>
-        generateVisualWorkersAI(input, {
-          ai: env.workersAi!,
-          kind,
-          recentBlock: sharedRecentBlock,
-          correction,
-        }),
-    });
-  }
-  if (env.geminiApiKey) {
-    providers.push({
-      label: "Gemini",
-      maxAttempts: maxAttemptsPerProvider,
-      attempt: ({ correction }) =>
-        generateVisualGemini(input, {
-          apiKey: env.geminiApiKey!,
-          kind,
-          recentBlock: sharedRecentBlock,
-          correction,
-          generateContentImpl: opts.generateContentImpl,
-        }),
-    });
-  }
-
-  if (!providers.length) {
-    throw new Error(
-      "No AI provider configured for visualize. Set GROQ_API_KEY, bind Workers AI (env.AI), or set GEMINI_API_KEY.",
-    );
-  }
-
-  let finalProviderLabel = "";
-  let finalAttempts = 0;
-  let lastErrorWasUnavailable = false;
-
-  for (const provider of providers) {
-    let providerAttempts = 0;
-    for (let attempt = 1; attempt <= provider.maxAttempts; attempt++) {
-      providerAttempts = attempt;
-      const correction = lastError
-        ? `\n\nPREVIOUS ATTEMPT FAILED: ${lastError}\nReturn a corrected, complete JSON object that matches the schema exactly.`
-        : "";
-      try {
-        const visual = await provider.attempt({ attempt, correction });
-        const check = runContentValidations(visual);
-        if (!check.ok) {
-          lastError = check.reason;
-          lastErrorWasUnavailable = false;
-          warnings.push(`attempt ${attempt} (${provider.label}/${kind}): ${check.reason}`);
-          continue;
-        }
-        return { visual, attempts: attempt, warnings };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (isBillingOrCreditError(err) || isRateLimitError(err)) {
-          lastErrorWasUnavailable = true;
-          warnings.push(
-            `${provider.label}: unavailable (${msg}) — failing over to the next provider`,
-          );
-          lastError = ""; // fresh start for the next provider; this wasn't a content problem to "fix"
-          break;
-        }
-        lastError = msg;
-        lastErrorWasUnavailable = false;
-        warnings.push(`attempt ${attempt} (${provider.label}/${kind}): ${msg}`);
-      }
-    }
-    finalProviderLabel = provider.label;
-    finalAttempts = providerAttempts;
-  }
-
-  throw new Error(
-    lastErrorWasUnavailable
-      ? `All configured providers are rate-limited or unpaid/credits exhausted (kind=${kind}). Add credits, wait for rate limits to reset, or configure another provider (GROQ_API_KEY, Workers AI binding, GEMINI_API_KEY). Warnings: ${warnings.join(" | ")}`
-      : `Failed to generate a valid visual after ${finalAttempts} attempts via ${finalProviderLabel} (kind=${kind}). Last error: ${lastError || "unknown"}. Warnings: ${warnings.join(" | ")}`,
-  );
 }
