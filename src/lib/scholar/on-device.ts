@@ -32,9 +32,17 @@ import {
 /** Minimal shape of a Chrome Prompt API session that we depend on. */
 export interface LanguageModelSessionLike {
   prompt(input: string, opts?: { responseConstraint?: unknown }): Promise<string>;
+  /**
+   * Fresh conversation, same initialPrompts. Real sessions have this; fakes in
+   * tests may not, so callers must tolerate its absence.
+   */
+  clone?(): Promise<LanguageModelSessionLike>;
   /** Present on real sessions; used to pre-flight the input quota. */
   measureInputUsage?(input: string): Promise<number>;
+  /** Total token budget for this session. */
   inputQuota?: number;
+  /** Tokens already consumed by initialPrompts + conversation history. */
+  inputUsage?: number;
   destroy?(): void;
 }
 
@@ -86,10 +94,17 @@ export async function isOnDeviceReady(): Promise<boolean> {
   return (await onDeviceAvailability()) === "available";
 }
 
-// One session per kind, created lazily. The per-kind system prompt is baked in
-// at create() time so it is processed once rather than on every slide — the
-// mermaid guide alone is ~1,600 tokens and re-sending it per request would
-// dominate generation time.
+// One TEMPLATE session per kind, created lazily and never prompted directly.
+// The per-kind system prompt is baked in at create() time so it is processed
+// once rather than on every slide — the mermaid guide alone is ~1,600 tokens.
+//
+// Prompt API sessions are conversations: every prompt() appends the user turn
+// AND the reply to that session's history, charged against inputQuota. Reusing
+// one session across slides would therefore accumulate turns until Chrome
+// starts evicting oldest-first — and the oldest thing in the session is the
+// system prompt carrying all the format rules, so quality would degrade
+// silently and in the worst possible way. Each generation clones instead:
+// clone() keeps initialPrompts (already processed) but resets the history.
 const sessions = new Map<StrictKind, Promise<LanguageModelSessionLike>>();
 
 /** Drop cached sessions — call when skill rules change (they live in the system prompt). */
@@ -179,30 +194,39 @@ export async function generateVisualOnDevice(
   input: OnDeviceVisualInput,
   opts: { skillRules?: string[] } = {},
 ): Promise<Visual> {
-  const session = await getSession(kind, opts.skillRules ?? []);
+  const template = await getSession(kind, opts.skillRules ?? []);
+  // Fresh conversation per generation — see the comment on `sessions`. Falls
+  // back to the template itself for fakes that don't implement clone().
+  const session = (await template.clone?.()) ?? template;
   const userPrompt = buildOnDeviceUserPrompt(kind, input);
 
-  // Pre-flight the quota so an oversized prompt fails with something
-  // actionable instead of a generic model error mid-voice-turn.
-  if (session.measureInputUsage && typeof session.inputQuota === "number") {
-    try {
-      const usage = await session.measureInputUsage(userPrompt);
-      if (usage > session.inputQuota) {
+  try {
+    // Pre-flight against the budget REMAINING after initialPrompts, not the
+    // total, so an oversized `facts` fails with something actionable instead
+    // of a generic model error mid-voice-turn.
+    if (session.measureInputUsage && typeof session.inputQuota === "number") {
+      const remaining = session.inputQuota - (session.inputUsage ?? 0);
+      let usage: number | undefined;
+      try {
+        usage = await session.measureInputUsage(userPrompt);
+      } catch {
+        // measureInputUsage itself failing shouldn't block the attempt.
+      }
+      if (usage !== undefined && usage > remaining) {
         throw new Error(
-          `prompt for kind=${kind} needs ${usage} tokens but the on-device quota is ${session.inputQuota} — shorten \`facts\``,
+          `prompt for kind=${kind} needs ${usage} tokens but only ${remaining} remain of the on-device quota (${session.inputQuota}) — shorten \`facts\``,
         );
       }
-    } catch (err) {
-      // Only re-throw our own quota error; a failure inside measureInputUsage
-      // itself shouldn't block the attempt.
-      if (err instanceof Error && err.message.includes("on-device quota")) throw err;
     }
-  }
 
-  const raw = await session.prompt(userPrompt, {
-    responseConstraint: STRICT_KIND_SCHEMAS[kind],
-  });
-  return parseVisualJson(kind, raw);
+    const raw = await session.prompt(userPrompt, {
+      responseConstraint: STRICT_KIND_SCHEMAS[kind],
+    });
+    return parseVisualJson(kind, raw);
+  } finally {
+    // Only destroy clones; the template is cached for reuse.
+    if (session !== template) session.destroy?.();
+  }
 }
 
 const TEASER_SYSTEM_PROMPT = `You write ONE short sentence (under 14 words) previewing a visual that is about to appear. Describe concretely what the viewer will see, e.g. "A flowchart of the three-stage retrieval pipeline". No quotes, no trailing filler like "Loading...", just the preview.`;
@@ -230,11 +254,16 @@ export async function generateTeaserOnDevice(input: {
       throw err;
     });
 
-  const session = await teaserSession;
-  const text = await session.prompt(
-    `Topic: ${input.topic}${input.hint ? `\nStructure: ${input.hint}` : ""}`,
-  );
-  const cleaned = text.trim().replace(/^"|"$/g, "");
-  if (!cleaned) throw new Error("on-device teaser returned empty content");
-  return cleaned.slice(0, 200);
+  const template = await teaserSession;
+  const session = (await template.clone?.()) ?? template;
+  try {
+    const text = await session.prompt(
+      `Topic: ${input.topic}${input.hint ? `\nStructure: ${input.hint}` : ""}`,
+    );
+    const cleaned = text.trim().replace(/^"|"$/g, "");
+    if (!cleaned) throw new Error("on-device teaser returned empty content");
+    return cleaned.slice(0, 200);
+  } finally {
+    if (session !== template) session.destroy?.();
+  }
 }

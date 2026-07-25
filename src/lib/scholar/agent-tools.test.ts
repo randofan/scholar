@@ -11,7 +11,11 @@ import {
   regenerateAfterRenderFailure,
 } from "./agent-tools";
 import { useScholarStore } from "./store";
-import { __setLanguageModel, type LanguageModelLike } from "./on-device";
+import {
+  __setLanguageModel,
+  type LanguageModelLike,
+  type LanguageModelSessionLike,
+} from "./on-device";
 
 /** Fake Prompt API returning canned model output in order (last repeats). */
 function fakeModel(responses: string[], onPrompt?: (p: string) => void): LanguageModelLike {
@@ -169,6 +173,59 @@ describe("generateVisualWithRetries", () => {
     });
     expect(prompts[0]).toContain("Stage 1 retrieves 1000 candidates");
     expect(prompts[0]).toContain("query to ranked results");
+  });
+});
+
+describe("on-device session hygiene", () => {
+  it("clones the cached session per generation so conversation history never accumulates", async () => {
+    // Prompt API sessions are conversations: without clone(), every retry and
+    // every slide would append turns to one session until Chrome evicts the
+    // oldest content — which is the system prompt holding the format rules.
+    let creates = 0;
+    let clones = 0;
+    let destroyed = 0;
+    const makeSession = (isClone: boolean): LanguageModelSessionLike => ({
+      prompt: async () => DIAGRAM_JSON,
+      clone: async () => {
+        clones += 1;
+        return makeSession(true);
+      },
+      destroy: () => {
+        if (isClone) destroyed += 1;
+      },
+    });
+    __setLanguageModel({
+      availability: async () => "available",
+      create: async () => {
+        creates += 1;
+        return makeSession(false);
+      },
+    });
+
+    await generateVisualWithRetries("diagram", { topic: "one" });
+    await generateVisualWithRetries("diagram", { topic: "two" });
+
+    // The expensive system-prompt processing happens once...
+    expect(creates).toBe(1);
+    // ...but each generation gets a fresh conversation, and cleans it up.
+    expect(clones).toBe(2);
+    expect(destroyed).toBe(2);
+  });
+
+  it("rejects a prompt that exceeds the quota REMAINING after the system prompt", async () => {
+    __setLanguageModel({
+      availability: async () => "available",
+      create: async () => ({
+        prompt: async () => DIAGRAM_JSON,
+        inputQuota: 1000,
+        inputUsage: 900, // system prompt already consumed most of the budget
+        measureInputUsage: async () => 200, // fits under 1000, but not under 100
+      }),
+    });
+
+    await expect(
+      generateVisualWithRetries("diagram", { topic: "t" }, { maxAttempts: 1 }),
+    ).rejects.toThrow(/only 100 remain of the on-device quota/);
   });
 });
 
