@@ -3,7 +3,7 @@ import { themes, type ThemeType } from "./themes";
 let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
 let currentTheme: ThemeType | null = null;
 
-async function getMermaid(theme: ThemeType) {
+export async function getMermaid(theme: ThemeType) {
   if (!mermaidPromise) {
     mermaidPromise = import("mermaid").then((m) => m.default);
   }

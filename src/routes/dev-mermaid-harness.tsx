@@ -1,10 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 import { renderMermaidToSvg, type MermaidRenderResult } from "@/lib/mermaid/render";
+import { parseMermaid, type MermaidParseOutcome } from "@/lib/mermaid/validate";
 
 declare global {
   interface Window {
     __renderMermaidForTest?: (source: string) => Promise<MermaidRenderResult>;
+    __parseMermaidForTest?: (source: string) => Promise<MermaidParseOutcome>;
   }
 }
 
@@ -25,8 +27,10 @@ function ProductionGuard() {
 function DevMermaidHarnessPage() {
   useEffect(() => {
     window.__renderMermaidForTest = renderMermaidToSvg;
+    window.__parseMermaidForTest = (source) => parseMermaid(source);
     return () => {
       delete window.__renderMermaidForTest;
+      delete window.__parseMermaidForTest;
     };
   }, []);
 

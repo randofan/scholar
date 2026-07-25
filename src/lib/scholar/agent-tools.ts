@@ -1,5 +1,6 @@
 import { rankReferencesByQuery, extractReferences } from "./references";
 import { runContentValidations, type StrictKind, type Visual } from "./illustrate-shared";
+import type { MermaidParseOutcome } from "@/lib/mermaid/validate";
 import {
   generateTeaserOnDevice,
   generateVisualOnDevice,
@@ -189,10 +190,97 @@ export interface VisualRequest {
   correction?: string;
 }
 
+/**
+ * The part of a rejected visual worth showing the model back. A small model
+ * repairs far better when it can see what it actually produced than when it
+ * is only told which rule it broke — "fix this part" needs a "this".
+ * Deliberately narrow: only the field the validators judge, so the correction
+ * stays small enough not to crowd the input quota.
+ */
+function describeFailingOutput(visual: Visual): string {
+  if (visual.kind === "diagram" && visual.diagram) return visual.diagram.mermaid.slice(0, 800);
+  if (visual.kind === "chart" && visual.chart) {
+    return JSON.stringify({
+      xLabel: visual.chart.xLabel,
+      yLabel: visual.chart.yLabel,
+      narration: visual.narration,
+    });
+  }
+  if (visual.kind === "math" && visual.math) return JSON.stringify(visual.math.steps).slice(0, 800);
+  if (visual.kind === "table" && visual.table) {
+    return JSON.stringify({
+      columns: visual.table.columns,
+      rowLengths: visual.table.rows.map((r) => r.length),
+    }).slice(0, 800);
+  }
+  return visual.narration.slice(0, 200);
+}
+
+function buildCorrection(reason: string, failingOutput?: string): string {
+  if (!failingOutput) return reason;
+  return `${reason}\n\nWhat you produced (fix ONLY the problem above, keep everything else):\n${failingOutput}`;
+}
+
+/**
+ * Injectable so Node tests and the eval harness — where mermaid cannot load —
+ * run the loop without the parser gate, while the browser gets the real one.
+ */
+export type MermaidParseCheck = (source: string) => Promise<MermaidParseOutcome>;
+
+/**
+ * The real parser, imported lazily so this module stays importable from Node
+ * (tests, eval harness) where mermaid cannot load. Reports `checked: false`
+ * rather than failing when that happens, so the loop degrades to the
+ * structural gate alone instead of rejecting everything.
+ */
+const browserMermaidParse: MermaidParseCheck = async (source) => {
+  // Short-circuit before the import: mermaid needs a DOM, so in Node/SSR
+  // loading it would cost ~600KB only to fail. Cheap guard, and it keeps this
+  // module importable from the eval harness.
+  if (typeof document === "undefined") return { ok: true, checked: false };
+  try {
+    const { parseMermaid } = await import("@/lib/mermaid/validate");
+    return await parseMermaid(source);
+  } catch {
+    return { ok: true, checked: false };
+  }
+};
+
+/**
+ * The self-correcting generation loop.
+ *
+ *   generate → structural check → real mermaid parse → accept
+ *                    ↓ fail             ↓ fail
+ *              feed the exact reason + the failing output back, regenerate
+ *
+ * Two validation gates, in cost order:
+ *
+ * 1. runContentValidations — synchronous and cheap, and its rejection reasons
+ *    are written for a model to act on ("mindmap bodies must not contain
+ *    '-->' arrows"). Catches most failures with the most useful message.
+ * 2. parseMermaid — mermaid's OWN grammar, the authority on whether a diagram
+ *    will actually render. Gate 1 is an approximation of this and always had
+ *    a false-negative class; running in the browser lets us close it inside
+ *    the loop instead of catching it after render.
+ *
+ * Each attempt gets a FRESH cloned session rather than continuing one
+ * conversation. The model sees the same information either way (the failing
+ * output is passed explicitly), but a fresh session keeps input usage flat
+ * across attempts instead of growing toward the quota — which matters because
+ * the diagram system prompt alone is ~1,600 tokens, and quota overflow evicts
+ * oldest-first, i.e. the format rules.
+ *
+ * Retries are affordable here in a way they never were against a metered API:
+ * no network, no rate limit, no cost.
+ */
 export async function generateVisualWithRetries(
   kind: StrictKind,
   input: VisualRequest,
-  opts: { skillRules?: string[]; maxAttempts?: number } = {},
+  opts: {
+    skillRules?: string[];
+    maxAttempts?: number;
+    parseMermaid?: MermaidParseCheck;
+  } = {},
 ): Promise<{ visual: Visual; warnings: string[] }> {
   const maxAttempts = opts.maxAttempts ?? MAX_ATTEMPTS;
   const warnings: string[] = [];
@@ -202,11 +290,30 @@ export async function generateVisualWithRetries(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const visual = await generateVisualOnDevice(kind, { ...input, correction }, opts);
-      const check = runContentValidations(visual);
-      if (check.ok) return { visual, warnings };
-      warnings.push(check.reason);
-      correction = check.reason;
-      lastError = check.reason;
+
+      // Gate 1 — structural, synchronous, best error messages.
+      const structural = runContentValidations(visual);
+      if (!structural.ok) {
+        warnings.push(structural.reason);
+        correction = buildCorrection(structural.reason, describeFailingOutput(visual));
+        lastError = structural.reason;
+        continue;
+      }
+
+      // Gate 2 — mermaid's real parser. Only meaningful for diagrams, and
+      // only when a parser impl was supplied (browser).
+      if (kind === "diagram" && opts.parseMermaid && visual.diagram) {
+        const parsed = await opts.parseMermaid(visual.diagram.mermaid);
+        if (!parsed.ok) {
+          const reason = `mermaid's own parser rejected this: ${parsed.reason}`;
+          warnings.push(reason);
+          correction = buildCorrection(reason, visual.diagram.mermaid.slice(0, 800));
+          lastError = reason;
+          continue;
+        }
+      }
+
+      return { visual, warnings };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       warnings.push(msg);
@@ -410,7 +517,7 @@ export function regenerateAfterRenderFailure(itemId: string, renderError: string
           // failures our structural validator provably cannot.
           correction: `mermaid.render() rejected this source with "${renderError}". Failing source:\n${failedSource.slice(0, 600)}`,
         },
-        { skillRules: skillRulesForKind("diagram") },
+        { skillRules: skillRulesForKind("diagram"), parseMermaid: browserMermaidParse },
       );
       harvestLessons("diagram", warnings);
       store().patchCanvas(itemId, {
@@ -467,7 +574,7 @@ export function buildClientTools(host: ToolHost) {
               facts: params.facts,
               recentVisuals: collectRecentVisuals(id),
             },
-            { skillRules: skillRulesForKind(kind) },
+            { skillRules: skillRulesForKind(kind), parseMermaid: browserMermaidParse },
           );
           harvestLessons(kind, warnings);
 

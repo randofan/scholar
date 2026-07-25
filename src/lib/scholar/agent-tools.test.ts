@@ -176,6 +176,92 @@ describe("generateVisualWithRetries", () => {
   });
 });
 
+describe("self-correcting loop — feedback quality", () => {
+  it("shows the model its own failing output, not just the rule it broke", async () => {
+    const prompts: string[] = [];
+    const brokenMermaid = "flowchart LR\n  A --> B  B --> C";
+    __setLanguageModel(
+      fakeModel(
+        [JSON.stringify({ title: "T", narration: "n", mermaid: brokenMermaid }), DIAGRAM_JSON],
+        (p) => prompts.push(p),
+      ),
+    );
+
+    await generateVisualWithRetries("diagram", { topic: "T" });
+
+    // A small model repairs far better when it can see what it produced.
+    expect(prompts[1]).toContain("PREVIOUS ATTEMPT FAILED:");
+    expect(prompts[1]).toContain("What you produced");
+    expect(prompts[1]).toContain(brokenMermaid);
+    expect(prompts[1]).toMatch(/fix ONLY the problem/i);
+  });
+
+  it("regenerates when mermaid's own parser rejects a source our structural check accepted", async () => {
+    const prompts: string[] = [];
+    // Structurally fine by our rules (valid header, balanced brackets), so
+    // only the real grammar can catch it — this is the false-negative class
+    // that used to escape all the way to render time.
+    const sneaky = "flowchart LR\n  A[One] --> B[Two]\n  B --> C[Three]";
+    __setLanguageModel(
+      fakeModel(
+        [JSON.stringify({ title: "T", narration: "n", mermaid: sneaky }), DIAGRAM_JSON],
+        (p) => prompts.push(p),
+      ),
+    );
+
+    let call = 0;
+    const parseMermaid = async () => {
+      call += 1;
+      return call === 1
+        ? ({ ok: false, checked: true, reason: "Parse error on line 3: unexpected token" } as const)
+        : ({ ok: true, checked: true } as const);
+    };
+
+    const { visual, warnings } = await generateVisualWithRetries(
+      "diagram",
+      { topic: "T" },
+      { parseMermaid },
+    );
+
+    expect(visual.diagram?.mermaid).toContain("Q[Query]");
+    expect(warnings[0]).toMatch(/mermaid's own parser rejected this/);
+    expect(prompts[1]).toContain("Parse error on line 3");
+    expect(prompts[1]).toContain(sneaky);
+  });
+
+  it("accepts a diagram that clears both the structural check and the real parser", async () => {
+    __setLanguageModel(fakeModel([DIAGRAM_JSON]));
+    const parseMermaid = vi.fn(async () => ({ ok: true, checked: true }) as const);
+
+    const { warnings } = await generateVisualWithRetries(
+      "diagram",
+      { topic: "T" },
+      { parseMermaid },
+    );
+
+    expect(parseMermaid).toHaveBeenCalledTimes(1);
+    expect(warnings).toEqual([]);
+  });
+
+  it("only runs the parser gate for diagrams", async () => {
+    __setLanguageModel(
+      fakeModel([JSON.stringify({ title: "T", narration: "n", columns: ["a"], rows: [["1"]] })]),
+    );
+    const parseMermaid = vi.fn(async () => ({ ok: true, checked: true }) as const);
+
+    await generateVisualWithRetries("table", { topic: "T" }, { parseMermaid });
+
+    expect(parseMermaid).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the structural gate alone when no parser is supplied", async () => {
+    __setLanguageModel(fakeModel([DIAGRAM_JSON]));
+    // No parseMermaid — e.g. Node, where mermaid cannot load.
+    const { visual } = await generateVisualWithRetries("diagram", { topic: "T" });
+    expect(visual.diagram?.mermaid).toContain("flowchart LR");
+  });
+});
+
 describe("on-device session hygiene", () => {
   it("clones the cached session per generation so conversation history never accumulates", async () => {
     // Prompt API sessions are conversations: without clone(), every retry and

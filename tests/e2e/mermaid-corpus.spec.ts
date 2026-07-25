@@ -19,9 +19,12 @@ test.describe("mermaid corpus — real render fidelity", () => {
     // Wait for the hook itself (not just the static ready div) — on a cold
     // dev-server hit, hydration + the mermaid module warm-up can lag behind
     // the initial (SSR'd) DOM paint.
-    await page.waitForFunction(() => typeof window.__renderMermaidForTest === "function", {
-      timeout: 15_000,
-    });
+    await page.waitForFunction(
+      () =>
+        typeof window.__renderMermaidForTest === "function" &&
+        typeof window.__parseMermaidForTest === "function",
+      { timeout: 15_000 },
+    );
   });
 
   for (const entry of corpus) {
@@ -51,6 +54,25 @@ test.describe("mermaid corpus — real render fidelity", () => {
         validatorResult.ok,
         `validateMermaid() disagrees with the real renderer for "${entry.name}": validator says ${
           validatorResult.ok ? "ok" : `fail (${validatorResult.reason})`
+        }, real render says ${realResult.ok ? "ok" : `fail (${realResult.error})`}`,
+      ).toBe(realResult.ok);
+
+      // And the generation loop's second gate — mermaid's own parser — must
+      // agree with the renderer too. This is the gate that makes the loop
+      // able to *guarantee* renderable output rather than merely probable
+      // output, so a disagreement here would silently reopen that gap.
+      const parseResult = await page.evaluate(
+        (source) => window.__parseMermaidForTest!(source),
+        entry.source,
+      );
+      expect(
+        parseResult.checked,
+        `parseMermaid() did not actually run for "${entry.name}" — the loop's parser gate would be a no-op`,
+      ).toBe(true);
+      expect(
+        parseResult.ok,
+        `parseMermaid() disagrees with the real renderer for "${entry.name}": parser says ${
+          parseResult.ok ? "ok" : `fail (${"reason" in parseResult ? parseResult.reason : ""})`
         }, real render says ${realResult.ok ? "ok" : `fail (${realResult.error})`}`,
       ).toBe(realResult.ok);
     });
