@@ -8,11 +8,14 @@ import {
 
 describe("Scholar voice session options", () => {
   it("passes prompt and first-message overrides through signed WebSocket sessions", () => {
-    const options = buildScholarVoiceSessionOptions("wss://api.elevenlabs.io/v1/convai/conversation?signed=1", {
-      name: "paper.pdf",
-      pages: 7,
-      text: "TEST_CONTEXT_ABC",
-    });
+    const options = buildScholarVoiceSessionOptions(
+      "wss://api.elevenlabs.io/v1/convai/conversation?signed=1",
+      {
+        name: "paper.pdf",
+        pages: 7,
+        text: "TEST_CONTEXT_ABC",
+      },
+    );
 
     expect(options).toMatchObject({
       signedUrl: "wss://api.elevenlabs.io/v1/convai/conversation?signed=1",
@@ -36,7 +39,11 @@ describe("Scholar voice session options", () => {
   });
 
   it("also builds PDF context as a contextual update after connect", () => {
-    const context = buildScholarContextUpdate({ name: "paper.pdf", pages: 2, text: "TEST_CONTEXT_ABC" });
+    const context = buildScholarContextUpdate({
+      name: "paper.pdf",
+      pages: 2,
+      text: "TEST_CONTEXT_ABC",
+    });
 
     expect(context).toContain("session instructions and uploaded PDF context");
     expect(context).toContain('The user uploaded "paper.pdf" (2 pages)');

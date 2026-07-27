@@ -27,14 +27,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  loadCassette,
-  recordingCall,
-  recordingFetch,
-  replayingCall,
-  replayingFetch,
-  type Cassette,
-} from "./cassette";
+import { loadCassette, recordingCall, replayingCall, type Cassette } from "./cassette";
 import { createFileBucket } from "./file-bucket";
 import { generateVisualWithRetries } from "../src/lib/scholar/agent-tools";
 import { pickStrictKind } from "../src/lib/scholar/illustrate-shared";

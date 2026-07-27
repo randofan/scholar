@@ -89,7 +89,13 @@ export function ChartView({ spec }: { spec: ChartSpec }) {
           <LineChart data={spec.data} margin={margin}>
             {common}
             {spec.yKeys.map((k, i) => (
-              <Line key={k} dataKey={k} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
+              <Line
+                key={k}
+                dataKey={k}
+                stroke={COLORS[i % COLORS.length]}
+                strokeWidth={2}
+                dot={false}
+              />
             ))}
           </LineChart>
         ) : spec.chartType === "bar" ? (
@@ -103,7 +109,13 @@ export function ChartView({ spec }: { spec: ChartSpec }) {
           <AreaChart data={spec.data} margin={margin}>
             {common}
             {spec.yKeys.map((k, i) => (
-              <Area key={k} dataKey={k} stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} fillOpacity={0.25} />
+              <Area
+                key={k}
+                dataKey={k}
+                stroke={COLORS[i % COLORS.length]}
+                fill={COLORS[i % COLORS.length]}
+                fillOpacity={0.25}
+              />
             ))}
           </AreaChart>
         ) : (

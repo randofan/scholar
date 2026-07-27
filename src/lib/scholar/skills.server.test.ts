@@ -1,12 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DISTILL_MODEL,
   MAX_SKILL_RULES,
   skillKeyForKind,
   distillLessonsIntoSkill,
-  invalidateSkillCache,
   loadSkillRules,
-  loadSkillRulesCached,
   mergeRulesDeterministic,
 } from "./skills.server";
 import type { R2BucketLike, WorkersAiLike } from "@/lib/cf-bindings";
@@ -29,10 +27,6 @@ const DIAGRAM_KEY = skillKeyForKind("diagram");
 
 const skillFile = (rules: string[]) =>
   JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00Z", rules });
-
-beforeEach(() => {
-  invalidateSkillCache();
-});
 
 describe("loadSkillRules", () => {
   it("returns [] when the bucket binding is missing", async () => {
@@ -162,16 +156,5 @@ describe("mergeRulesDeterministic", () => {
       "Label axes",
       "new one",
     ]);
-  });
-});
-
-describe("loadSkillRulesCached", () => {
-  it("caches reads within the TTL", async () => {
-    const { bucket, store } = memoryBucket({ [DIAGRAM_KEY]: skillFile(["cached rule"]) });
-    expect(await loadSkillRulesCached(bucket, "diagram")).toEqual(["cached rule"]);
-    store.set(DIAGRAM_KEY, skillFile(["changed rule"]));
-    expect(await loadSkillRulesCached(bucket, "diagram")).toEqual(["cached rule"]);
-    invalidateSkillCache();
-    expect(await loadSkillRulesCached(bucket, "diagram")).toEqual(["changed rule"]);
   });
 });

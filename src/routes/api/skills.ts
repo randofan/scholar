@@ -1,10 +1,6 @@
 import "@tanstack/react-start";
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  distillLessonsIntoSkill,
-  invalidateSkillCache,
-  loadSkillRules,
-} from "@/lib/scholar/skills.server";
+import { distillLessonsIntoSkill, loadSkillRules } from "@/lib/scholar/skills.server";
 import type { StrictKind } from "@/lib/scholar/illustrate-shared";
 import { getCfBindings } from "@/lib/cf-bindings";
 
@@ -85,7 +81,6 @@ export const Route = createFileRoute("/api/skills")({
           // rate-limiting the AI binding.
           for (const [kind, lessons] of grouped) {
             rulesByKind[kind] = await distillLessonsIntoSkill(SKILLS, AI, lessons, kind);
-            invalidateSkillCache(kind);
           }
           return new Response(JSON.stringify({ ok: true, rulesByKind }), {
             status: 200,

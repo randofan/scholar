@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchElevenLabsConversationSignedUrl, fetchElevenLabsConversationToken } from "./elevenlabs.server";
+import { fetchElevenLabsConversationSignedUrl } from "./elevenlabs.server";
 
 const originalApiKey = process.env.ELEVENLABS_API_KEY_1;
 
@@ -9,26 +9,17 @@ afterEach(() => {
 });
 
 describe("ElevenLabs connector helpers", () => {
-  it("requests a conversation token for a specific agent", async () => {
-    process.env.ELEVENLABS_API_KEY_1 = "test-key";
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ token: "token-123" }), { status: 200 }),
-    );
-
-    await expect(fetchElevenLabsConversationToken("agent_abc")).resolves.toBe("token-123");
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=agent_abc",
-      expect.objectContaining({ headers: { "xi-api-key": "test-key" } }),
-    );
-  });
-
   it("requests a signed URL for authenticated WebSocket sessions", async () => {
     process.env.ELEVENLABS_API_KEY_1 = "test-key";
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ signed_url: "wss://signed.example" }), { status: 200 }),
-    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ signed_url: "wss://signed.example" }), { status: 200 }),
+      );
 
-    await expect(fetchElevenLabsConversationSignedUrl("agent_abc")).resolves.toBe("wss://signed.example");
+    await expect(fetchElevenLabsConversationSignedUrl("agent_abc")).resolves.toBe(
+      "wss://signed.example",
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=agent_abc",
       expect.objectContaining({ headers: { "xi-api-key": "test-key" } }),

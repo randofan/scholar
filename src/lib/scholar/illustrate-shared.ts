@@ -5,42 +5,51 @@
 // the same validation and JSON Schemas the server path used, and pulling
 // illustrate.server.ts into the client bundle would drag a server SDK with it.
 
-import { z } from "zod";
+// The four visual shapes, declared once here and re-exported by store.ts.
+//
+// These were previously a Zod schema whose only consumer was `z.infer` — the
+// object was never .parse()d, so it pulled zod into the client bundle purely
+// to derive a type, while store.ts declared the same four shapes again as
+// plain interfaces. Runtime validation of model output is done by
+// runContentValidations + STRICT_KIND_SCHEMAS (which the Prompt API enforces
+// via responseConstraint), so nothing was checking against the Zod version
+// anyway.
 
-const ChartSpec = z.object({
-  chartType: z.enum(["line", "bar", "area", "scatter"]),
-  xKey: z.string(),
-  yKeys: z.array(z.string()).min(1),
-  data: z.array(z.record(z.string(), z.union([z.number(), z.string()]))).min(2),
-  xLabel: z.string().optional(),
-  yLabel: z.string().optional(),
-});
-const MathSpec = z.object({
-  steps: z.array(z.string()).min(1),
-  inline: z.string().optional(),
-});
-const DiagramSpec = z.object({ mermaid: z.string().min(5) });
-const TableSpec = z.object({
-  columns: z.array(z.string()).min(1),
-  rows: z.array(z.array(z.union([z.string(), z.number()]))).min(1),
-});
-const CalloutSpec = z.object({
-  body: z.string(),
-  tone: z.enum(["info", "warn", "key"]).optional(),
-});
+export interface ChartSpec {
+  chartType: "line" | "bar" | "area" | "scatter";
+  xKey: string;
+  yKeys: string[];
+  data: Record<string, number | string>[];
+  xLabel?: string;
+  yLabel?: string;
+}
 
-export const VisualSchema = z.object({
-  title: z.string(),
-  narration: z.string().describe("One short sentence summarizing what's on screen"),
-  kind: z.enum(["chart", "math", "diagram", "table", "callout"]),
-  chart: ChartSpec.optional(),
-  math: MathSpec.optional(),
-  diagram: DiagramSpec.optional(),
-  table: TableSpec.optional(),
-  callout: CalloutSpec.optional(),
-});
+export interface MathSpec {
+  /** KaTeX strings, one per line of derivation. */
+  steps: string[];
+  inline?: string;
+}
 
-export type Visual = z.infer<typeof VisualSchema>;
+export interface DiagramSpec {
+  /** mermaid source */
+  mermaid: string;
+}
+
+export interface TableSpec {
+  columns: string[];
+  rows: (string | number)[][];
+}
+
+export interface Visual {
+  title: string;
+  /** One short sentence summarizing what's on screen. */
+  narration: string;
+  kind: StrictKind;
+  chart?: ChartSpec;
+  math?: MathSpec;
+  diagram?: DiagramSpec;
+  table?: TableSpec;
+}
 
 const MERMAID_HEADERS = [
   "graph",
@@ -422,7 +431,7 @@ const HEDGE_RE =
 const META_NARRATION_RE =
   /^\s*(diagram|chart|table|math|formula|equation|illustration|figure|visualization)\s*:/i;
 const PROMPT_LIKE_VISUAL_TEXT_RE =
-  /^\s*(a\s+)?(chart|table|diagram|graph|math derivation|callout)\s+(comparing|summarizing|showing|illustrating|describing)\b|\bsummarizing the\b/i;
+  /^\s*(a\s+)?(chart|table|diagram|graph|math derivation)\s+(comparing|summarizing|showing|illustrating|describing)\b|\bsummarizing the\b/i;
 
 export function containsHedgeLanguage(text: string | undefined | null): boolean {
   if (!text) return false;
@@ -451,9 +460,7 @@ export function runContentValidations(
     if (!axisCheck.ok) return axisCheck;
   }
 
-  const hedgeSource = [visual.narration, visual.callout?.body].find((t) =>
-    containsHedgeLanguage(t),
-  );
+  const hedgeSource = containsHedgeLanguage(visual.narration) ? visual.narration : undefined;
   if (hedgeSource) {
     return {
       ok: false,
@@ -461,9 +468,7 @@ export function runContentValidations(
     };
   }
 
-  const promptLikeSource = [visual.narration, visual.callout?.body].find((t) =>
-    isPromptLikeVisualText(t),
-  );
+  const promptLikeSource = isPromptLikeVisualText(visual.narration) ? visual.narration : undefined;
   if (promptLikeSource) {
     return {
       ok: false,
@@ -489,16 +494,13 @@ const KIND_KEYWORDS: Array<{ kind: Visual["kind"]; re: RegExp }> = [
 
 export function detectRequestedKind(input: IllustrateInput): Visual["kind"] | null {
   const text = `${input.topic ?? ""} ${input.hint ?? ""}`;
-  // Callouts are intentionally NOT detectable — we never produce text-only
-  // slides, even when the user/agent asks for a quote or "key takeaway".
-  // Such requests get promoted to a real visual by the model or the fallback.
   for (const { kind, re } of KIND_KEYWORDS) {
     if (re.test(text)) return kind;
   }
   return null;
 }
 
-/** The four kinds we actually generate. `callout` is never produced — no text-only slides. */
+/** The four kinds we generate. There is deliberately no text-only slide kind. */
 export type StrictKind = "diagram" | "table" | "math" | "chart";
 
 export const STRICT_KIND_SCHEMAS: Record<StrictKind, Record<string, unknown>> = {
@@ -747,10 +749,10 @@ export function buildSystemPrompt(kind: StrictKind, skillRules: string[] = []): 
     .join("\n")}`;
 }
 
-/** Pick the concrete kind to ask the strict-output model for. Never callout. */
+/** Fallback kind picker, used when a caller has no explicit kind (evals). */
 export function pickStrictKind(input: IllustrateInput): StrictKind {
   const requested = detectRequestedKind(input);
-  if (requested && requested !== "callout") return requested;
+  if (requested) return requested;
   const text = `${input.topic ?? ""} ${input.hint ?? ""}`;
   if (/\b(compare|comparison|versus|vs\.?|baseline|trade-?off|matrix)\b/i.test(text))
     return "table";

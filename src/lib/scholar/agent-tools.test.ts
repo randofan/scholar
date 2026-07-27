@@ -7,7 +7,6 @@ import {
   generateVisualWithRetries,
   fetchResearchBriefing,
   guessSpeculativeVisualTopic,
-  parseResearchResponse,
   regenerateAfterRenderFailure,
 } from "./agent-tools";
 import { useScholarStore } from "./store";
@@ -72,57 +71,39 @@ afterEach(() => {
 const waitForMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("research client response handling", () => {
-  it("turns the exact upstream non-JSON body into a controlled error", async () => {
-    await expect(
-      parseResearchResponse(
-        new Response("upstream request timeout", {
-          status: 502,
-          statusText: "Bad Gateway",
-        }),
-      ),
-    ).rejects.toThrow(/non-JSON response \(502 Bad Gateway\): upstream request timeout/);
-  });
-
-  it("retries transient non-JSON failures instead of crashing on Response.json", async () => {
+  it("turns a non-JSON upstream body into a controlled error naming endpoint and status", async () => {
+    // The bug this guards: res.json() on a gateway's plain-text error page
+    // used to throw a cryptic SyntaxError with no indication of which call
+    // failed or why.
     const fetchImpl = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response("upstream request timeout", { status: 502 }))
-      .mockResolvedValueOnce(
-        Response.json({
-          ok: true,
-          summary: "Recovered research briefing.",
-          keyPoints: ["Retry succeeded"],
-        }),
+      .mockResolvedValue(
+        new Response("upstream request timeout", { status: 502, statusText: "Bad Gateway" }),
       );
 
-    const result = await fetchResearchBriefing(
-      { query: "unweight 2026", pdfExcerpt: "Unweight paper excerpt" },
-      fetchImpl,
-      { attempts: 2, retryDelayMs: 0 },
+    await expect(fetchResearchBriefing({ query: "unweight 2026" }, fetchImpl)).rejects.toThrow(
+      /Research service returned a non-JSON response \(502 Bad Gateway\): upstream request timeout/,
     );
-
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(result.summary).toBe("Recovered research briefing.");
   });
 
-  it("returns a useful final error if every retry gets non-JSON", async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(
-      async () =>
-        new Response("upstream request timeout", {
-          status: 503,
-          statusText: "Service Unavailable",
-        }),
-    );
+  it("surfaces an ok:false payload as an error rather than returning it as success", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ok: false, error: "no provider configured" }));
 
-    await expect(
-      fetchResearchBriefing({ query: "unweight 2026" }, fetchImpl, {
-        attempts: 2,
-        retryDelayMs: 0,
-      }),
-    ).rejects.toThrow(
-      /Research service returned a non-JSON response \(503 Service Unavailable\): upstream request timeout/,
+    await expect(fetchResearchBriefing({ query: "q" }, fetchImpl)).rejects.toThrow(
+      /no provider configured/,
     );
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the briefing on success", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ok: true, summary: "A briefing.", keyPoints: ["one"] }));
+
+    const result = await fetchResearchBriefing({ query: "q" }, fetchImpl);
+    expect(result.summary).toBe("A briefing.");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

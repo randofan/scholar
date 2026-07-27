@@ -1,40 +1,65 @@
-import type { CSSProperties } from 'react';
-import type { MermaidConfig } from 'mermaid';
+import type { CSSProperties } from "react";
+import type { MermaidConfig } from "mermaid";
 
-export type ThemeType = 'linearLight' | 'linearDark' | 'notion' | 'ghibli' | 'spotless' | 'brutalist' | 'glassmorphism' | 'memphis' | 'softPop' | 'cyberpunk' | 'monochrome' | 'darkMinimal' | 'wireframe' | 'handDrawn' | 'grafana' | 'noir' | 'material' | 'aurora' | 'win95' | 'doodle' | 'organic' | 'hightech' | 'kawaii' | 'geometricCollage';
+export type ThemeType =
+  | "linearLight"
+  | "linearDark"
+  | "notion"
+  | "ghibli"
+  | "spotless"
+  | "brutalist"
+  | "glassmorphism"
+  | "memphis"
+  | "softPop"
+  | "cyberpunk"
+  | "monochrome"
+  | "darkMinimal"
+  | "wireframe"
+  | "handDrawn"
+  | "grafana"
+  | "noir"
+  | "material"
+  | "aurora"
+  | "win95"
+  | "doodle"
+  | "organic"
+  | "hightech"
+  | "kawaii"
+  | "geometricCollage";
 
 export interface ThemeConfig {
   name: string;
   mermaidConfig: MermaidConfig;
-  bgClass: string; 
+  bgClass: string;
   bgStyle?: CSSProperties; // For custom patterns
-    annotationColors: {
-        primary: string;
-        secondary: string;
-        text: string;
-    };
+  annotationColors: {
+    primary: string;
+    secondary: string;
+    text: string;
+  };
 }
 
 export const themes: Record<ThemeType, ThemeConfig> = {
   linearLight: {
-    name: 'Linear Light',
-        annotationColors: {
-            primary: '#a0a3a6',
-            secondary: '#9e9e9e',
-            text: '#454545',
-        },
+    name: "Linear Light",
+    annotationColors: {
+      primary: "#a0a3a6",
+      secondary: "#9e9e9e",
+      text: "#454545",
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#ffffff',
-        primaryColor: '#ffffff',
-        primaryTextColor: '#171717', // Neutral 900
-        primaryBorderColor: '#e5e5e5', // Neutral 200
-        lineColor: '#737373', // Neutral 500
-        secondaryColor: '#fafafa',
-        tertiaryColor: '#f5f5f5',
-        fontFamily: '"Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        fontSize: '14px',
+        background: "#ffffff",
+        primaryColor: "#ffffff",
+        primaryTextColor: "#171717", // Neutral 900
+        primaryBorderColor: "#e5e5e5", // Neutral 200
+        lineColor: "#737373", // Neutral 500
+        secondaryColor: "#fafafa",
+        tertiaryColor: "#f5f5f5",
+        fontFamily:
+          '"Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontSize: "14px",
       },
       themeCSS: `
         .node rect, .node circle, .node polygon, .node path { stroke-width: 1.5px; }
@@ -52,34 +77,35 @@ export const themes: Record<ThemeType, ThemeConfig> = {
         .left-axis .label text, .bottom-axis .label text { fill: #171717 !important; font-size: 14px !important; }
         .left-axis .title text { fill: #525252 !important; font-size: 16px !important; }
         .bottom-axis .title text { fill: #525252 !important; font-size: 16px !important; }
-      `
+      `,
     },
-    bgClass: 'bg-white',
+    bgClass: "bg-white",
     bgStyle: {
-        backgroundImage: 'radial-gradient(#e5e5e5 1px, transparent 1px)',
-        backgroundSize: '20px 20px'
-    }
+      backgroundImage: "radial-gradient(#e5e5e5 1px, transparent 1px)",
+      backgroundSize: "20px 20px",
+    },
   },
   linearDark: {
-    name: 'Linear Dark',
-      annotationColors: {
-          primary: '#c7c7c7', // Indigo 400
-          secondary: '#c9c9c9', // Indigo 300
-          text: '#d4d4d4', // Indigo 100
-      },
+    name: "Linear Dark",
+    annotationColors: {
+      primary: "#c7c7c7", // Indigo 400
+      secondary: "#c9c9c9", // Indigo 300
+      text: "#d4d4d4", // Indigo 100
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
         darkMode: true,
-        background: '#09090b', // Zinc 950
-        primaryColor: '#18181b', // Zinc 900
-        primaryTextColor: '#f4f4f5', // Zinc 100
-        primaryBorderColor: '#27272a', // Zinc 800
-        lineColor: '#52525b', // Zinc 600
-        secondaryColor: '#27272a',
-        tertiaryColor: '#27272a',
-        fontFamily: '"Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        fontSize: '14px',
+        background: "#09090b", // Zinc 950
+        primaryColor: "#18181b", // Zinc 900
+        primaryTextColor: "#f4f4f5", // Zinc 100
+        primaryBorderColor: "#27272a", // Zinc 800
+        lineColor: "#52525b", // Zinc 600
+        secondaryColor: "#27272a",
+        tertiaryColor: "#27272a",
+        fontFamily:
+          '"Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontSize: "14px",
       },
       themeCSS: `
         .node rect, .node circle, .node polygon, .node path { stroke-width: 1.5px; }
@@ -96,34 +122,35 @@ export const themes: Record<ThemeType, ThemeConfig> = {
         .left-axis .label text, .bottom-axis .label text { fill: #d4d4d8 !important; font-size: 14px !important; }
         .left-axis .title text { fill: #a1a1aa !important; font-size: 16px !important; }
         .bottom-axis .title text { fill: #a1a1aa !important; font-size: 16px !important; }
-      `
+      `,
     },
-    bgClass: 'bg-[#09090b]',
+    bgClass: "bg-[#09090b]",
     bgStyle: {
-      backgroundColor: '#09090b',
-        backgroundImage: 'radial-gradient(#27272a 1px, transparent 1px)',
-        backgroundSize: '20px 20px'
-    }
+      backgroundColor: "#09090b",
+      backgroundImage: "radial-gradient(#27272a 1px, transparent 1px)",
+      backgroundSize: "20px 20px",
+    },
   },
   notion: {
-    name: 'Notion',
-      annotationColors: {
-          primary: '#6B8CAE', // Notion blue
-          secondary: '#73A78D', // Notion green
-          text: '#334155', // Slate 700
-      },
+    name: "Notion",
+    annotationColors: {
+      primary: "#6B8CAE", // Notion blue
+      secondary: "#73A78D", // Notion green
+      text: "#334155", // Slate 700
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#ffffff',
-        primaryColor: '#f1f5f9', // Slate 100
-        primaryTextColor: '#334155', // Slate 700
-        primaryBorderColor: '#cbd5e1', // Slate 300 (for sequence diagram lifelines)
-        lineColor: '#94a3b8', // Slate 400
-        secondaryColor: '#e2e8f0', // Slate 200
-        tertiaryColor: '#cbd5e1', // Slate 300
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Helvetica, Arial, sans-serif',
-        fontSize: '15px',
+        background: "#ffffff",
+        primaryColor: "#f1f5f9", // Slate 100
+        primaryTextColor: "#334155", // Slate 700
+        primaryBorderColor: "#cbd5e1", // Slate 300 (for sequence diagram lifelines)
+        lineColor: "#94a3b8", // Slate 400
+        secondaryColor: "#e2e8f0", // Slate 200
+        tertiaryColor: "#cbd5e1", // Slate 300
+        fontFamily:
+          '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Helvetica, Arial, sans-serif',
+        fontSize: "15px",
       },
       themeCSS: `
         /* Flowchart Node Styling */
@@ -203,35 +230,35 @@ export const themes: Record<ThemeType, ThemeConfig> = {
         .chart-title text { fill: #334155 !important; font-weight: 600 !important; font-size: 20px !important; }
         .left-axis .title text, .bottom-axis .title text { fill: #64748b !important; font-size: 16px !important; }
         .legend text { fill: #475569 !important; font-size: 14px !important; }
-      `
+      `,
     },
-    bgClass: 'bg-white',
+    bgClass: "bg-white",
   },
   cyberpunk: {
-    name: 'Cyberpunk',
-      annotationColors: {
-          primary: '#00f2ff', // Neon Cyan
-          secondary: '#ff00ff', // Neon Magenta
-          text: '#00f2ff', // Neon Cyan
-      },
+    name: "Cyberpunk",
+    annotationColors: {
+      primary: "#00f2ff", // Neon Cyan
+      secondary: "#ff00ff", // Neon Magenta
+      text: "#00f2ff", // Neon Cyan
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
         darkMode: true,
-        background: '#051423', // Navy Blue
-        primaryColor: '#051423', // Transparent/Bg match
-        primaryTextColor: '#00f2ff', // Neon Cyan
-        primaryBorderColor: '#00f2ff',
-        lineColor: '#00f2ff',
-        secondaryColor: '#051423',
-        tertiaryColor: '#051423',
+        background: "#051423", // Navy Blue
+        primaryColor: "#051423", // Transparent/Bg match
+        primaryTextColor: "#00f2ff", // Neon Cyan
+        primaryBorderColor: "#00f2ff",
+        lineColor: "#00f2ff",
+        secondaryColor: "#051423",
+        tertiaryColor: "#051423",
         fontFamily: '"Inter", "Noto Sans SC", system-ui, sans-serif',
-        fontSize: '16px',
-        mainBkg: '#051423',
-        nodeBorder: '#00f2ff',
-        clusterBkg: '#051423',
-        clusterBorder: '#00f2ff',
-        edgeLabelBackground: '#051423',
+        fontSize: "16px",
+        mainBkg: "#051423",
+        nodeBorder: "#00f2ff",
+        clusterBkg: "#051423",
+        clusterBorder: "#00f2ff",
+        edgeLabelBackground: "#051423",
       },
       themeCSS: `
         /* Flowchart Node Styling */
@@ -380,42 +407,42 @@ export const themes: Record<ThemeType, ThemeConfig> = {
             font-size: 12px !important;
             text-shadow: 0 0 8px rgba(0, 242, 255, 0.5);
         }
-      `
+      `,
     },
-    bgClass: 'bg-[#051423]',
+    bgClass: "bg-[#051423]",
     bgStyle: {
-      backgroundColor: '#051423',
-        backgroundImage: `
+      backgroundColor: "#051423",
+      backgroundImage: `
             linear-gradient(rgba(0, 242, 255, 0.03) 1px, transparent 1px),
             linear-gradient(90deg, rgba(0, 242, 255, 0.03) 1px, transparent 1px),
             radial-gradient(circle at 50% 50%, rgba(0, 242, 255, 0.05), transparent 70%)
         `,
-        backgroundSize: '40px 40px, 40px 40px, 100% 100%',
-        backgroundBlendMode: 'screen'
-    }
+      backgroundSize: "40px 40px, 40px 40px, 100% 100%",
+      backgroundBlendMode: "screen",
+    },
   },
   monochrome: {
-    name: 'Monochrome',
-      annotationColors: {
-          primary: '#000000', // Black
-          secondary: '#606060', // Dark gray
-          text: '#000000', // Black
-      },
+    name: "Monochrome",
+    annotationColors: {
+      primary: "#000000", // Black
+      secondary: "#606060", // Dark gray
+      text: "#000000", // Black
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#ffffff',
-        primaryColor: '#ffffff',
-        primaryTextColor: '#000000',
-        primaryBorderColor: '#000000',
-        lineColor: '#000000',
-        secondaryColor: '#ffffff',
-        tertiaryColor: '#ffffff',
+        background: "#ffffff",
+        primaryColor: "#ffffff",
+        primaryTextColor: "#000000",
+        primaryBorderColor: "#000000",
+        lineColor: "#000000",
+        secondaryColor: "#ffffff",
+        tertiaryColor: "#ffffff",
         fontFamily: '"Inter", "Noto Sans SC", sans-serif',
-        mainBkg: '#ffffff',
-        nodeBorder: '#000000',
-        clusterBkg: '#ffffff',
-        clusterBorder: '#000000',
+        mainBkg: "#ffffff",
+        nodeBorder: "#000000",
+        clusterBkg: "#ffffff",
+        clusterBorder: "#000000",
       },
       themeCSS: `
         .node rect, .node circle { stroke-width: 2px; fill: #fff; }
@@ -434,30 +461,30 @@ export const themes: Record<ThemeType, ThemeConfig> = {
         .chart-title text { fill: #000000 !important; font-weight: 700 !important; font-size: 16px !important; }
         .left-axis .title text, .bottom-axis .title text { fill: #525252 !important; font-size: 13px !important; }
         .legend text { fill: #000000 !important; font-size: 12px !important; }
-      `
+      `,
     },
-    bgClass: 'bg-white',
+    bgClass: "bg-white",
   },
   ghibli: {
-    name: 'Ghibli',
-      annotationColors: {
-          primary: '#D4A373', // Warm brown
-          secondary: '#FFB300', // Amber yellow
-          text: '#6B5B4F', // Deep brown
-      },
+    name: "Ghibli",
+    annotationColors: {
+      primary: "#D4A373", // Warm brown
+      secondary: "#FFB300", // Amber yellow
+      text: "#6B5B4F", // Deep brown
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#FDF6E3', // Ghibli Cream
-        primaryColor: '#ffffff',
-        primaryTextColor: '#3A2E2C', // Deep Brown
-        primaryBorderColor: '#D2B48C', // Tan color for borders/lifelines
-        lineColor: '#3A2E2C', // Matching text color for lines
-        secondaryColor: '#fff3e0', 
-        tertiaryColor: '#e8f5e9',
-        fontFamily: 'Open Sans, Noto Sans SC, sans-serif',
-        fontSize: '16px',
-        edgeLabelBackground: '#FDF6E3',
+        background: "#FDF6E3", // Ghibli Cream
+        primaryColor: "#ffffff",
+        primaryTextColor: "#3A2E2C", // Deep Brown
+        primaryBorderColor: "#D2B48C", // Tan color for borders/lifelines
+        lineColor: "#3A2E2C", // Matching text color for lines
+        secondaryColor: "#fff3e0",
+        tertiaryColor: "#e8f5e9",
+        fontFamily: "Open Sans, Noto Sans SC, sans-serif",
+        fontSize: "16px",
+        edgeLabelBackground: "#FDF6E3",
       },
       themeCSS: `
         /* Flowchart Node Styling */
@@ -610,39 +637,39 @@ export const themes: Record<ThemeType, ThemeConfig> = {
         }
         .left-axis .title text, .bottom-axis .title text { fill: #6B5B4F !important; font-size: 13px !important; }
         .legend text { fill: #6B5B4F !important; font-size: 12px !important; }
-      `
+      `,
     },
-    bgClass: 'bg-[#FDF6E3]',
+    bgClass: "bg-[#FDF6E3]",
     bgStyle: {
-        backgroundColor: '#FDF6E3',
-        backgroundImage: `
+      backgroundColor: "#FDF6E3",
+      backgroundImage: `
             linear-gradient(45deg, rgba(210, 180, 140, 0.03) 25%, transparent 25%), 
             linear-gradient(-45deg, rgba(210, 180, 140, 0.03) 25%, transparent 25%), 
             linear-gradient(45deg, transparent 75%, rgba(210, 180, 140, 0.03) 75%), 
             linear-gradient(-45deg, transparent 75%, rgba(210, 180, 140, 0.03) 75%)
         `,
-        backgroundSize: '20px 20px'
-    }
+      backgroundSize: "20px 20px",
+    },
   },
   spotless: {
-    name: 'Spotless',
+    name: "Spotless",
     annotationColors: {
-      primary: '#2C2416', // Deep brown-black
-      secondary: '#5A4A38', // Medium brown
-      text: '#1a1a1a', // Pure black
+      primary: "#2C2416", // Deep brown-black
+      secondary: "#5A4A38", // Medium brown
+      text: "#1a1a1a", // Pure black
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#EDE8DC', // Cream/beige background
-        primaryColor: '#F5F1E8', // Light cream for nodes
-        primaryTextColor: '#1a1a1a', // Black text
-        primaryBorderColor: '#2C2416', // Dark brown border
-        lineColor: '#2C2416', // Dark brown lines
-        secondaryColor: '#E8DCC8',
-        tertiaryColor: '#DFD3C3',
+        background: "#EDE8DC", // Cream/beige background
+        primaryColor: "#F5F1E8", // Light cream for nodes
+        primaryTextColor: "#1a1a1a", // Black text
+        primaryBorderColor: "#2C2416", // Dark brown border
+        lineColor: "#2C2416", // Dark brown lines
+        secondaryColor: "#E8DCC8",
+        tertiaryColor: "#DFD3C3",
         fontFamily: '"Helvetica Neue", "Arial", "Noto Sans SC", sans-serif',
-        fontSize: '15px',
+        fontSize: "15px",
       },
       themeCSS: `
         /* Spotless - Vintage manual/instruction booklet style */
@@ -887,11 +914,11 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-family: "Helvetica Neue", "Arial", "Noto Sans SC", sans-serif;
           font-weight: 600;
         }
-      `
+      `,
     },
-    bgClass: 'bg-[#EDE8DC]',
+    bgClass: "bg-[#EDE8DC]",
     bgStyle: {
-      backgroundColor: '#EDE8DC',
+      backgroundColor: "#EDE8DC",
       backgroundImage: `
         repeating-linear-gradient(
           0deg,
@@ -908,28 +935,28 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           transparent 40px
         )
       `,
-      backgroundSize: '40px 40px'
-    }
+      backgroundSize: "40px 40px",
+    },
   },
   brutalist: {
-    name: 'Brutalist',
+    name: "Brutalist",
     annotationColors: {
-      primary: '#FF6B35', // Bold orange
-      secondary: '#4ECDC4', // Bright teal
-      text: '#000000', // Pure black
+      primary: "#FF6B35", // Bold orange
+      secondary: "#4ECDC4", // Bright teal
+      text: "#000000", // Pure black
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#f6f3e9', // Light warm beige
-        primaryColor: '#ffffff', // White for nodes
-        primaryTextColor: '#000000', // Black text
-        primaryBorderColor: '#000000', // Black border
-        lineColor: '#000000', // Black lines
-        secondaryColor: '#FFE66D', // Bright yellow
-        tertiaryColor: '#FF6B35', // Bold orange
+        background: "#f6f3e9", // Light warm beige
+        primaryColor: "#ffffff", // White for nodes
+        primaryTextColor: "#000000", // Black text
+        primaryBorderColor: "#000000", // Black border
+        lineColor: "#000000", // Black lines
+        secondaryColor: "#FFE66D", // Bright yellow
+        tertiaryColor: "#FF6B35", // Bold orange
         fontFamily: '"Arial", "Helvetica", "Noto Sans SC", sans-serif',
-        fontSize: '16px',
+        fontSize: "16px",
       },
       themeCSS: `
         /* Brutalist/Neobrutalism - Hard shadows and bold borders */
@@ -1318,32 +1345,32 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-family: "Arial", "Helvetica", "Noto Sans SC", sans-serif;
           font-weight: 700;
         }
-      `
+      `,
     },
-    bgClass: 'bg-[#f6f3e9]',
+    bgClass: "bg-[#f6f3e9]",
     bgStyle: {
-      backgroundColor: '#f6f3e9',
-    }
+      backgroundColor: "#f6f3e9",
+    },
   },
   glassmorphism: {
-    name: 'Glassmorphism',
+    name: "Glassmorphism",
     annotationColors: {
-      primary: '#8B5CF6', // Purple
-      secondary: '#EC4899', // Pink
-      text: '#1F2937', // Dark gray
+      primary: "#8B5CF6", // Purple
+      secondary: "#EC4899", // Pink
+      text: "#1F2937", // Dark gray
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: 'rgba(255, 255, 255, 0.1)', // Semi-transparent white
-        primaryColor: 'rgba(255, 255, 255, 0.25)', // Glass white
-        primaryTextColor: '#1F2937', // Dark gray text
-        primaryBorderColor: 'rgba(255, 255, 255, 0.4)', // Light border
-        lineColor: 'rgba(139, 92, 246, 0.6)', // Purple lines
-        secondaryColor: 'rgba(236, 72, 153, 0.2)', // Pink tint
-        tertiaryColor: 'rgba(59, 130, 246, 0.2)', // Blue tint
+        background: "rgba(255, 255, 255, 0.1)", // Semi-transparent white
+        primaryColor: "rgba(255, 255, 255, 0.25)", // Glass white
+        primaryTextColor: "#1F2937", // Dark gray text
+        primaryBorderColor: "rgba(255, 255, 255, 0.4)", // Light border
+        lineColor: "rgba(139, 92, 246, 0.6)", // Purple lines
+        secondaryColor: "rgba(236, 72, 153, 0.2)", // Pink tint
+        tertiaryColor: "rgba(59, 130, 246, 0.2)", // Blue tint
         fontFamily: '"SF Pro Display", "Inter", "Noto Sans SC", -apple-system, sans-serif',
-        fontSize: '15px',
+        fontSize: "15px",
       },
       themeCSS: `
         /* Glassmorphism - Modern glass effect */
@@ -1715,35 +1742,35 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-family: "SF Pro Display", "Inter", "Noto Sans SC", sans-serif;
           font-weight: 500;
         }
-      `
+      `,
     },
-    bgClass: 'bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50',
+    bgClass: "bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50",
     bgStyle: {
-      background: 'linear-gradient(135deg, #F3E8FF 0%, #FCE7F3 30%, #DBEAFE 60%, #F3E8FF 100%)',
-      position: 'relative' as const,
-    }
+      background: "linear-gradient(135deg, #F3E8FF 0%, #FCE7F3 30%, #DBEAFE 60%, #F3E8FF 100%)",
+      position: "relative" as const,
+    },
   },
   softPop: {
-    name: 'Soft Pop',
-      annotationColors: {
-          primary: '#73D1C8', // Teal
-          secondary: '#FCD34D', // Yellow
-          text: '#2D3748', // Dark grey
-      },
+    name: "Soft Pop",
+    annotationColors: {
+      primary: "#73D1C8", // Teal
+      secondary: "#FCD34D", // Yellow
+      text: "#2D3748", // Dark grey
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#EFF1F5',
-        primaryColor: '#73D1C8', // Teal
-          primaryTextColor: '#2D3748', // Dark grey for better visibility
-        primaryBorderColor: '#73D1C8', // Use teal for borders/lifelines
-        secondaryColor: '#FCD34D', // Yellow
-        secondaryTextColor: '#4B5563',
-        tertiaryColor: '#5D6D7E', // Grey
-          tertiaryTextColor: '#2D3748', // Dark grey for better visibility
-        lineColor: '#566573', // Dark Grey Lines
+        background: "#EFF1F5",
+        primaryColor: "#73D1C8", // Teal
+        primaryTextColor: "#2D3748", // Dark grey for better visibility
+        primaryBorderColor: "#73D1C8", // Use teal for borders/lifelines
+        secondaryColor: "#FCD34D", // Yellow
+        secondaryTextColor: "#4B5563",
+        tertiaryColor: "#5D6D7E", // Grey
+        tertiaryTextColor: "#2D3748", // Dark grey for better visibility
+        lineColor: "#566573", // Dark Grey Lines
         fontFamily: '"JetBrains Mono", "Noto Sans SC", monospace',
-        fontSize: '15px',
+        fontSize: "15px",
       },
       themeCSS: `
         /* Global text styling - ensure titles and legends are dark */
@@ -1950,30 +1977,30 @@ export const themes: Record<ThemeType, ThemeConfig> = {
             font-size: 12px !important;
             font-family: "JetBrains Mono", "Noto Sans SC", monospace;
         }
-      `
+      `,
     },
-    bgClass: 'bg-[#EFF1F5]',
+    bgClass: "bg-[#EFF1F5]",
   },
   darkMinimal: {
-    name: 'Dark Minimal',
-      annotationColors: {
-          primary: '#ffffff', // White
-          secondary: '#9BA5B0', // Light gray
-          text: '#e5e5e5', // Light grey
-      },
+    name: "Dark Minimal",
+    annotationColors: {
+      primary: "#ffffff", // White
+      secondary: "#9BA5B0", // Light gray
+      text: "#e5e5e5", // Light grey
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
         darkMode: true,
-        background: '#1a1a1a', // Dark grey bg
-        primaryColor: '#1a1a1a', // Match background for transparent look
-        primaryTextColor: '#e5e5e5', // Light grey text
-        primaryBorderColor: '#404040', // Subtle border
-        lineColor: '#ffffff', // White lines
-        secondaryColor: '#1a1a1a',
-        tertiaryColor: '#1a1a1a',
+        background: "#1a1a1a", // Dark grey bg
+        primaryColor: "#1a1a1a", // Match background for transparent look
+        primaryTextColor: "#e5e5e5", // Light grey text
+        primaryBorderColor: "#404040", // Subtle border
+        lineColor: "#ffffff", // White lines
+        secondaryColor: "#1a1a1a",
+        tertiaryColor: "#1a1a1a",
         fontFamily: '"Inter", "Noto Sans SC", system-ui, sans-serif',
-        fontSize: '15px',
+        fontSize: "15px",
       },
       themeCSS: `
         /* Minimal node styling with subtle borders */
@@ -2050,32 +2077,32 @@ export const themes: Record<ThemeType, ThemeConfig> = {
         }
         .left-axis .title text, .bottom-axis .title text { fill: #a3a3a3 !important; font-size: 13px !important; }
         .legend text { fill: #e5e5e5 !important; font-size: 12px !important; }
-      `
+      `,
     },
-    bgClass: 'bg-[#1a1a1a]',
+    bgClass: "bg-[#1a1a1a]",
     bgStyle: {
-      backgroundColor: '#1a1a1a',
-    }
+      backgroundColor: "#1a1a1a",
+    },
   },
   wireframe: {
-    name: 'Wireframe',
-      annotationColors: {
-          primary: '#666666', // Dark grey
-          secondary: '#999999', // Medium grey
-          text: '#333333', // Very dark grey
-      },
+    name: "Wireframe",
+    annotationColors: {
+      primary: "#666666", // Dark grey
+      secondary: "#999999", // Medium grey
+      text: "#333333", // Very dark grey
+    },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#f5f5f5', // Light grey background
-        primaryColor: '#ffffff', // White for nodes
-        primaryTextColor: '#333333', // Dark grey text
-        primaryBorderColor: '#999999', // Medium grey borders
-        lineColor: '#666666', // Dark grey lines
-        secondaryColor: '#e8e8e8', // Light grey secondary
-        tertiaryColor: '#d4d4d4', // Medium grey tertiary
+        background: "#f5f5f5", // Light grey background
+        primaryColor: "#ffffff", // White for nodes
+        primaryTextColor: "#333333", // Dark grey text
+        primaryBorderColor: "#999999", // Medium grey borders
+        lineColor: "#666666", // Dark grey lines
+        secondaryColor: "#e8e8e8", // Light grey secondary
+        tertiaryColor: "#d4d4d4", // Medium grey tertiary
         fontFamily: '"Helvetica Neue", "Noto Sans SC", Arial, sans-serif',
-        fontSize: '14px',
+        fontSize: "14px",
       },
       themeCSS: `
         /* Wireframe/Blueprint style - Clean rectangular boxes */
@@ -2245,38 +2272,38 @@ export const themes: Record<ThemeType, ThemeConfig> = {
         }
         .left-axis .title text, .bottom-axis .title text { fill: #666666 !important; font-size: 13px !important; }
         .legend text { fill: #333333 !important; font-size: 12px !important; }
-      `
+      `,
     },
-    bgClass: 'bg-[#f5f5f5]',
+    bgClass: "bg-[#f5f5f5]",
     bgStyle: {
-        backgroundImage: `
+      backgroundImage: `
             linear-gradient(#d4d4d4 1px, transparent 1px),
             linear-gradient(90deg, #d4d4d4 1px, transparent 1px)
         `,
-        backgroundSize: '20px 20px'
-    }
+      backgroundSize: "20px 20px",
+    },
   },
-    handDrawn: {
-        name: 'Hand Drawn',
-        annotationColors: {
-            primary: '#5D6D7E', // Ink gray-blue
-            secondary: '#7E6B5D', // Ink brown
-            text: '#1a1a1a', // Dark ink
-        },
-        mermaidConfig: {
-            theme: 'base',
-            themeVariables: {
-                background: '#fffef9', // Warm off-white, like paper
-                primaryColor: '#ffffff',
-                primaryTextColor: '#1a1a1a',
-                primaryBorderColor: '#1a1a1a',
-                lineColor: '#1a1a1a',
-                secondaryColor: '#fff9e6',
-                tertiaryColor: '#ffe8cc',
-                fontFamily: '"Excalifont", "Xiaolai", cursive',
-                fontSize: '18px', // Optimized for hand-drawn feel
-            },
-            themeCSS: `
+  handDrawn: {
+    name: "Hand Drawn",
+    annotationColors: {
+      primary: "#5D6D7E", // Ink gray-blue
+      secondary: "#7E6B5D", // Ink brown
+      text: "#1a1a1a", // Dark ink
+    },
+    mermaidConfig: {
+      theme: "base",
+      themeVariables: {
+        background: "#fffef9", // Warm off-white, like paper
+        primaryColor: "#ffffff",
+        primaryTextColor: "#1a1a1a",
+        primaryBorderColor: "#1a1a1a",
+        lineColor: "#1a1a1a",
+        secondaryColor: "#fff9e6",
+        tertiaryColor: "#ffe8cc",
+        fontFamily: '"Excalifont", "Xiaolai", cursive',
+        fontSize: "18px", // Optimized for hand-drawn feel
+      },
+      themeCSS: `
         /* Hand-drawn sketch style */
         /* Global text styling */
         .titleText, .sectionTitle, .taskText, .taskTextOutsideRight, .taskTextOutsideLeft, 
@@ -2547,39 +2574,40 @@ export const themes: Record<ThemeType, ThemeConfig> = {
             font-family: "Excalifont", "Xiaolai", cursive;
             font-weight: 600;
         }
-      `
-        },
-        bgClass: 'bg-[#fffef9]',
-        bgStyle: {
-            backgroundColor: '#fffef9',
-            backgroundImage: `
+      `,
+    },
+    bgClass: "bg-[#fffef9]",
+    bgStyle: {
+      backgroundColor: "#fffef9",
+      backgroundImage: `
             radial-gradient(circle at 2px 2px, rgba(26, 26, 26, 0.03) 1px, transparent 1px)
         `,
-            backgroundSize: '30px 30px'
-        }
+      backgroundSize: "30px 30px",
     },
-    grafana: {
-        name: 'Grafana',
-      annotationColors: {
-          primary: '#5794F2', // Grafana blue
-          secondary: '#FF9830', // Grafana orange
-          text: '#D8D9DA', // Light grey
+  },
+  grafana: {
+    name: "Grafana",
+    annotationColors: {
+      primary: "#5794F2", // Grafana blue
+      secondary: "#FF9830", // Grafana orange
+      text: "#D8D9DA", // Light grey
+    },
+    mermaidConfig: {
+      theme: "base",
+      themeVariables: {
+        darkMode: true,
+        background: "#181B1F", // Grafana dark background
+        primaryColor: "#1F2428", // Slightly lighter for contrast
+        primaryTextColor: "#D8D9DA", // Light grey text
+        primaryBorderColor: "#3D434B", // Subtle borders
+        lineColor: "#5794F2", // Grafana signature blue
+        secondaryColor: "#262B31",
+        tertiaryColor: "#2C3235",
+        fontFamily:
+          '"Roboto", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontSize: "14px",
       },
-      mermaidConfig: {
-            theme: 'base',
-            themeVariables: {
-                darkMode: true,
-                background: '#181B1F', // Grafana dark background
-                primaryColor: '#1F2428', // Slightly lighter for contrast
-                primaryTextColor: '#D8D9DA', // Light grey text
-                primaryBorderColor: '#3D434B', // Subtle borders
-                lineColor: '#5794F2', // Grafana signature blue
-                secondaryColor: '#262B31',
-                tertiaryColor: '#2C3235',
-                fontFamily: '"Roboto", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-                fontSize: '14px',
-            },
-            themeCSS: `
+      themeCSS: `
         /* Grafana-inspired monitoring dashboard style */
         
         /* Flowchart nodes - Clean technical look */
@@ -2828,37 +2856,37 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           fill: #D8D9DA !important;
           font-family: "Roboto", "Noto Sans SC", sans-serif;
         }
-      `
-        },
-        bgClass: 'bg-[#181B1F]',
-        bgStyle: {
-            backgroundColor: '#181B1F',
-            backgroundImage: `
+      `,
+    },
+    bgClass: "bg-[#181B1F]",
+    bgStyle: {
+      backgroundColor: "#181B1F",
+      backgroundImage: `
         linear-gradient(rgba(61, 67, 75, 0.15) 1px, transparent 1px),
         linear-gradient(90deg, rgba(61, 67, 75, 0.15) 1px, transparent 1px)
       `,
-            backgroundSize: '24px 24px'
-        }
+      backgroundSize: "24px 24px",
+    },
   },
   memphis: {
-    name: 'Memphis',
+    name: "Memphis",
     annotationColors: {
-      primary: '#FF6B6B', // Memphis red
-      secondary: '#FECA57', // Memphis yellow
-      text: '#000000', // Black
+      primary: "#FF6B6B", // Memphis red
+      secondary: "#FECA57", // Memphis yellow
+      text: "#000000", // Black
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#FFFFFF',
-        primaryColor: '#FF6B6B', // Red
-        primaryTextColor: '#000000',
-        primaryBorderColor: '#000000',
-        lineColor: '#000000',
-        secondaryColor: '#FECA57', // Yellow
-        tertiaryColor: '#48DBFB', // Blue
+        background: "#FFFFFF",
+        primaryColor: "#FF6B6B", // Red
+        primaryTextColor: "#000000",
+        primaryBorderColor: "#000000",
+        lineColor: "#000000",
+        secondaryColor: "#FECA57", // Yellow
+        tertiaryColor: "#48DBFB", // Blue
         fontFamily: '"Comic Sans MS", "Arial Black", "Noto Sans SC", cursive, sans-serif',
-        fontSize: '16px',
+        fontSize: "16px",
       },
       themeCSS: `
         /* Memphis - 80s Pop Art Style */
@@ -3244,11 +3272,11 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-family: "Comic Sans MS", "Arial Black", "Noto Sans SC", cursive, sans-serif;
           font-weight: 900;
         }
-      `
+      `,
     },
-    bgClass: 'bg-white',
+    bgClass: "bg-white",
     bgStyle: {
-      backgroundColor: '#FEFEFE',
+      backgroundColor: "#FEFEFE",
       backgroundImage: `
         linear-gradient(45deg, rgba(255, 107, 107, 0.3) 25%, transparent 25%, transparent 75%, rgba(255, 107, 107, 0.3) 75%, rgba(255, 107, 107, 0.3)),
         linear-gradient(45deg, rgba(255, 107, 107, 0.3) 25%, transparent 25%, transparent 75%, rgba(255, 107, 107, 0.3) 75%, rgba(255, 107, 107, 0.3)),
@@ -3257,30 +3285,30 @@ export const themes: Record<ThemeType, ThemeConfig> = {
         linear-gradient(90deg, rgba(255, 159, 243, 0.04) 1px, transparent 1px),
         linear-gradient(rgba(255, 159, 243, 0.04) 1px, transparent 1px)
       `,
-      backgroundSize: '50px 50px, 50px 50px, 25px 25px, 25px 25px, 10px 10px, 10px 10px',
-      backgroundPosition: '0px 0px, 25px 25px, 25px 0px, 0px 12.5px, 0px 0px, 0px 0px',
-    }
+      backgroundSize: "50px 50px, 50px 50px, 25px 25px, 25px 25px, 10px 10px, 10px 10px",
+      backgroundPosition: "0px 0px, 25px 25px, 25px 0px, 0px 12.5px, 0px 0px, 0px 0px",
+    },
   },
   noir: {
-    name: 'Noir',
+    name: "Noir",
     annotationColors: {
-      primary: '#ffffff', // Pure white
-      secondary: '#cccccc', // Light gray
-      text: '#ffffff', // Pure white
+      primary: "#ffffff", // Pure white
+      secondary: "#cccccc", // Light gray
+      text: "#ffffff", // Pure white
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
         darkMode: true,
-        background: '#0a0a0a', // Deep black
-        primaryColor: '#1a1a1a', // Dark gray for nodes
-        primaryTextColor: '#ffffff', // White text
-        primaryBorderColor: '#ffffff', // White borders
-        lineColor: '#ffffff', // White lines
-        secondaryColor: '#1a1a1a',
-        tertiaryColor: '#1a1a1a',
+        background: "#0a0a0a", // Deep black
+        primaryColor: "#1a1a1a", // Dark gray for nodes
+        primaryTextColor: "#ffffff", // White text
+        primaryBorderColor: "#ffffff", // White borders
+        lineColor: "#ffffff", // White lines
+        secondaryColor: "#1a1a1a",
+        tertiaryColor: "#1a1a1a",
         fontFamily: '"Courier New", "Consolas", "Monaco", monospace',
-        fontSize: '16px',
+        fontSize: "16px",
       },
       themeCSS: `
         /* Noir Cinematic - Film noir style with spotlight effects */
@@ -3759,37 +3787,37 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-family: "Courier New", "Consolas", "Monaco", monospace;
           text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
         }
-      `
+      `,
     },
-    bgClass: 'bg-[#0a0a0a]',
+    bgClass: "bg-[#0a0a0a]",
     bgStyle: {
-      backgroundColor: '#0a0a0a',
+      backgroundColor: "#0a0a0a",
       backgroundImage: `
         linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%),
         radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.05) 0%, transparent 50%),
         radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.03) 0%, transparent 50%)
       `,
-    }
+    },
   },
   material: {
-    name: 'Material',
+    name: "Material",
     annotationColors: {
-      primary: '#6200ee', // Material Purple
-      secondary: '#03dac6', // Material Teal
-      text: '#333333', // Dark gray
+      primary: "#6200ee", // Material Purple
+      secondary: "#03dac6", // Material Teal
+      text: "#333333", // Dark gray
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#ffffff',
-        primaryColor: '#ffffff', // White for nodes
-        primaryTextColor: 'rgba(0, 0, 0, 0.87)', // Material Design primary text
-        primaryBorderColor: '#e0e0e0', // Light gray border
-        lineColor: '#757575', // Medium gray lines
-        secondaryColor: '#ffffff',
-        tertiaryColor: '#ffffff',
+        background: "#ffffff",
+        primaryColor: "#ffffff", // White for nodes
+        primaryTextColor: "rgba(0, 0, 0, 0.87)", // Material Design primary text
+        primaryBorderColor: "#e0e0e0", // Light gray border
+        lineColor: "#757575", // Medium gray lines
+        secondaryColor: "#ffffff",
+        tertiaryColor: "#ffffff",
         fontFamily: '"Roboto", "Noto Sans SC", -apple-system, sans-serif',
-        fontSize: '14px',
+        fontSize: "14px",
       },
       themeCSS: `
         /* Material Design - Elevation and shadows */
@@ -4279,33 +4307,33 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-size: 13px !important;
           font-family: "Roboto", "Noto Sans SC", -apple-system, sans-serif;
         }
-      `
+      `,
     },
-    bgClass: 'bg-white',
+    bgClass: "bg-white",
     bgStyle: {
-      backgroundColor: '#ffffff',
-    }
+      backgroundColor: "#ffffff",
+    },
   },
   aurora: {
-    name: 'Aurora',
+    name: "Aurora",
     annotationColors: {
-      primary: '#f093fb', // Soft pink
-      secondary: '#667eea', // Soft purple
-      text: '#ffffff', // White
+      primary: "#f093fb", // Soft pink
+      secondary: "#667eea", // Soft purple
+      text: "#ffffff", // White
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
         darkMode: true,
-        background: '#667eea',
-        primaryColor: 'rgba(255, 255, 255, 0.15)', // Glass-like
-        primaryTextColor: '#ffffff',
-        primaryBorderColor: 'rgba(255, 255, 255, 0.3)',
-        lineColor: 'rgba(255, 255, 255, 0.6)',
-        secondaryColor: 'rgba(255, 255, 255, 0.15)',
-        tertiaryColor: 'rgba(255, 255, 255, 0.15)',
+        background: "#667eea",
+        primaryColor: "rgba(255, 255, 255, 0.15)", // Glass-like
+        primaryTextColor: "#ffffff",
+        primaryBorderColor: "rgba(255, 255, 255, 0.3)",
+        lineColor: "rgba(255, 255, 255, 0.6)",
+        secondaryColor: "rgba(255, 255, 255, 0.15)",
+        tertiaryColor: "rgba(255, 255, 255, 0.15)",
         fontFamily: '"Inter", "Noto Sans SC", -apple-system, sans-serif',
-        fontSize: '15px',
+        fontSize: "15px",
       },
       themeCSS: `
         /* Aurora - Dreamy gradient style with glowing effects */
@@ -4816,37 +4844,37 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-family: "Inter", "Noto Sans SC", -apple-system, sans-serif;
           text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
         }
-      `
+      `,
     },
-    bgClass: 'bg-gradient-to-br from-[#667eea] via-[#764ba2] to-[#f093fb]',
+    bgClass: "bg-gradient-to-br from-[#667eea] via-[#764ba2] to-[#f093fb]",
     bgStyle: {
-      backgroundColor: '#667eea',
+      backgroundColor: "#667eea",
       backgroundImage: `
         linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%),
         radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
         radial-gradient(circle at 80% 80%, rgba(246, 147, 251, 0.15) 0%, transparent 50%)
       `,
-    }
+    },
   },
   win95: {
-    name: 'Windows 95',
+    name: "Windows 95",
     annotationColors: {
-      primary: '#000080', // Windows Blue
-      secondary: '#008080', // Windows Teal
-      text: '#000000', // Black
+      primary: "#000080", // Windows Blue
+      secondary: "#008080", // Windows Teal
+      text: "#000000", // Black
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#008080', // Classic teal desktop
-        primaryColor: '#c0c0c0', // Win95 gray
-        primaryTextColor: '#000000', // Black text
-        primaryBorderColor: '#808080', // Gray border
-        lineColor: '#000000', // Black lines
-        secondaryColor: '#c0c0c0',
-        tertiaryColor: '#c0c0c0',
+        background: "#008080", // Classic teal desktop
+        primaryColor: "#c0c0c0", // Win95 gray
+        primaryTextColor: "#000000", // Black text
+        primaryBorderColor: "#808080", // Gray border
+        lineColor: "#000000", // Black lines
+        secondaryColor: "#c0c0c0",
+        tertiaryColor: "#c0c0c0",
         fontFamily: '"MS Sans Serif", "Microsoft YaHei", Tahoma, sans-serif',
-        fontSize: '13px',
+        fontSize: "13px",
       },
       themeCSS: `
         /* Windows 95/98 - Retro 3D interface style */
@@ -5399,40 +5427,40 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-size: 12px !important;
           font-family: "MS Sans Serif", "Microsoft YaHei", Tahoma, sans-serif;
         }
-      `
+      `,
     },
-    bgClass: 'bg-[#008080]',
+    bgClass: "bg-[#008080]",
     bgStyle: {
-      backgroundColor: '#008080',
+      backgroundColor: "#008080",
       backgroundImage: `
         linear-gradient(45deg, #008080 25%, transparent 25%),
         linear-gradient(-45deg, #008080 25%, transparent 25%),
         linear-gradient(45deg, transparent 75%, #008080 75%),
         linear-gradient(-45deg, transparent 75%, #008080 75%)
       `,
-      backgroundSize: '2px 2px',
-      backgroundPosition: '0 0, 0 1px, 1px -1px, -1px 0px',
-    }
+      backgroundSize: "2px 2px",
+      backgroundPosition: "0 0, 0 1px, 1px -1px, -1px 0px",
+    },
   },
   doodle: {
-    name: 'Playful Doodle',
+    name: "Playful Doodle",
     annotationColors: {
-      primary: '#9333ea', // Purple
-      secondary: '#ec4899', // Pink
-      text: '#000000', // Black
+      primary: "#9333ea", // Purple
+      secondary: "#ec4899", // Pink
+      text: "#000000", // Black
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#ffeef8',
-        primaryColor: '#ffdff6', // Light pink
-        primaryTextColor: '#000000',
-        primaryBorderColor: '#000000',
-        lineColor: '#000000',
-        secondaryColor: '#dff4ff', // Light blue
-        tertiaryColor: '#f0e7ff', // Light purple
+        background: "#ffeef8",
+        primaryColor: "#ffdff6", // Light pink
+        primaryTextColor: "#000000",
+        primaryBorderColor: "#000000",
+        lineColor: "#000000",
+        secondaryColor: "#dff4ff", // Light blue
+        tertiaryColor: "#f0e7ff", // Light purple
         fontFamily: '"Comic Neue", "Comic Sans MS", "Noto Sans SC", cursive, sans-serif',
-        fontSize: '15px',
+        fontSize: "15px",
       },
       themeCSS: `
         /* Playful Doodle Style - Hand-drawn whimsical design */
@@ -6087,32 +6115,33 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           font-family: "Comic Neue", "Comic Sans MS", "Noto Sans SC", cursive, sans-serif;
           font-weight: 600;
         }
-      `
+      `,
     },
-    bgClass: 'bg-gradient-to-br from-[#ffeef8] to-[#e0f7ff]',
+    bgClass: "bg-gradient-to-br from-[#ffeef8] to-[#e0f7ff]",
     bgStyle: {
-      background: 'linear-gradient(135deg, #ffeef8 0%, #e0f7ff 100%)',
-    }
+      background: "linear-gradient(135deg, #ffeef8 0%, #e0f7ff 100%)",
+    },
   },
   organic: {
-    name: 'Organic Natural',
+    name: "Organic Natural",
     annotationColors: {
-      primary: '#6a9c89', // Sage green
-      secondary: '#8ba888', // Light sage
-      text: '#2d5016', // Dark green
+      primary: "#6a9c89", // Sage green
+      secondary: "#8ba888", // Light sage
+      text: "#2d5016", // Dark green
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#f5f9f3',
-        primaryColor: '#d4e7d0', // Light green
-        primaryTextColor: '#2d5016', // Dark green for good contrast
-        primaryBorderColor: '#8ba888',
-        lineColor: '#6a9c89',
-        secondaryColor: '#e8f4e5', // Very light green
-        tertiaryColor: '#c8d5b9', // Soft sage
-        fontFamily: '"Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        fontSize: '14px',
+        background: "#f5f9f3",
+        primaryColor: "#d4e7d0", // Light green
+        primaryTextColor: "#2d5016", // Dark green for good contrast
+        primaryBorderColor: "#8ba888",
+        lineColor: "#6a9c89",
+        secondaryColor: "#e8f4e5", // Very light green
+        tertiaryColor: "#c8d5b9", // Soft sage
+        fontFamily:
+          '"Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontSize: "14px",
       },
       themeCSS: `
         /* Organic Natural Style - Soft, flowing, nature-inspired design */
@@ -6743,38 +6772,38 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           fill: #2d5016 !important;
           font-weight: 600;
         }
-      `
+      `,
     },
-    bgClass: 'bg-gradient-to-br from-[#c8d5b9] to-[#8ba888]',
+    bgClass: "bg-gradient-to-br from-[#c8d5b9] to-[#8ba888]",
     bgStyle: {
-      background: 'linear-gradient(135deg, #c8d5b9 0%, #8ba888 100%)',
-    }
+      background: "linear-gradient(135deg, #c8d5b9 0%, #8ba888 100%)",
+    },
   },
   hightech: {
-    name: 'High Tech',
+    name: "High Tech",
     annotationColors: {
-      primary: '#00ff41',
-      secondary: '#00ffff',
-      text: '#00ff41',
+      primary: "#00ff41",
+      secondary: "#00ffff",
+      text: "#00ff41",
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
         darkMode: true,
-        background: '#0a0f1a',
-        primaryColor: '#0a0f1a',
-        primaryTextColor: '#00ff41',
-        primaryBorderColor: '#00ff41',
-        lineColor: '#00ff41',
-        secondaryColor: '#0a0f1a',
-        tertiaryColor: '#0a0f1a',
+        background: "#0a0f1a",
+        primaryColor: "#0a0f1a",
+        primaryTextColor: "#00ff41",
+        primaryBorderColor: "#00ff41",
+        lineColor: "#00ff41",
+        secondaryColor: "#0a0f1a",
+        tertiaryColor: "#0a0f1a",
         fontFamily: '"Courier New", "Noto Sans SC", monospace',
-        fontSize: '14px',
-        mainBkg: '#0a0f1a',
-        nodeBorder: '#00ff41',
-        clusterBkg: '#0a0f1a',
-        clusterBorder: '#00ff41',
-        edgeLabelBackground: '#0a0f1a',
+        fontSize: "14px",
+        mainBkg: "#0a0f1a",
+        nodeBorder: "#00ff41",
+        clusterBkg: "#0a0f1a",
+        clusterBorder: "#00ff41",
+        edgeLabelBackground: "#0a0f1a",
       },
       themeCSS: `
         /* 全局样式 - 科技感绿色主题 */
@@ -7296,38 +7325,38 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           fill: #00ff41 !important;
           font-weight: 700;
         }
-      `
+      `,
     },
-    bgClass: 'bg-[#0a0f1a]',
+    bgClass: "bg-[#0a0f1a]",
     bgStyle: {
-      background: 'radial-gradient(circle at center, #0a0f1a, #000000)',
-      boxShadow: '0 0 20px rgba(0,255,65,0.3), inset 0 0 20px rgba(0,255,65,0.1)',
-    }
+      background: "radial-gradient(circle at center, #0a0f1a, #000000)",
+      boxShadow: "0 0 20px rgba(0,255,65,0.3), inset 0 0 20px rgba(0,255,65,0.1)",
+    },
   },
   kawaii: {
-    name: 'Kawaii Cute',
+    name: "Kawaii Cute",
     annotationColors: {
-      primary: '#ff9ec7',
-      secondary: '#ffb3d1',
-      text: '#a8197d',
+      primary: "#ff9ec7",
+      secondary: "#ffb3d1",
+      text: "#a8197d",
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#fff5f8',
-        primaryColor: '#ffe9f5',
-        primaryTextColor: '#a8197d',
-        primaryBorderColor: '#ff9ec7',
-        lineColor: '#ff6b9d',
-        secondaryColor: '#ffd4e5',
-        tertiaryColor: '#ffe4f1',
+        background: "#fff5f8",
+        primaryColor: "#ffe9f5",
+        primaryTextColor: "#a8197d",
+        primaryBorderColor: "#ff9ec7",
+        lineColor: "#ff6b9d",
+        secondaryColor: "#ffd4e5",
+        tertiaryColor: "#ffe4f1",
         fontFamily: '"Comic Sans MS", "Noto Sans SC", "Segoe UI", cursive, sans-serif',
-        fontSize: '14px',
-        mainBkg: '#ffe9f5',
-        nodeBorder: '#ff9ec7',
-        clusterBkg: '#ffd4e5',
-        clusterBorder: '#ff9ec7',
-        edgeLabelBackground: '#fff5f8',
+        fontSize: "14px",
+        mainBkg: "#ffe9f5",
+        nodeBorder: "#ff9ec7",
+        clusterBkg: "#ffd4e5",
+        clusterBorder: "#ff9ec7",
+        edgeLabelBackground: "#fff5f8",
       },
       themeCSS: `
         /* 全局样式 - 可爱粉色主题 */
@@ -7839,33 +7868,33 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           stroke: #ff6b9d !important;
           stroke-width: 3px !important;
         }
-      `
+      `,
     },
-    bgClass: 'bg-gradient-to-br from-[#ffe4f1] via-[#ffd4e5] to-[#ffe9f5]',
+    bgClass: "bg-gradient-to-br from-[#ffe4f1] via-[#ffd4e5] to-[#ffe9f5]",
     bgStyle: {
-      background: 'linear-gradient(135deg, #ffe4f1 0%, #ffd4e5 50%, #ffe9f5 100%)',
-      position: 'relative' as const,
-    }
+      background: "linear-gradient(135deg, #ffe4f1 0%, #ffd4e5 50%, #ffe9f5 100%)",
+      position: "relative" as const,
+    },
   },
   geometricCollage: {
-    name: 'Geometric Collage',
+    name: "Geometric Collage",
     annotationColors: {
-      primary: '#4a90e2',
-      secondary: '#2e5f8f',
-      text: '#1e3a5f',
+      primary: "#4a90e2",
+      secondary: "#2e5f8f",
+      text: "#1e3a5f",
     },
     mermaidConfig: {
-      theme: 'base',
+      theme: "base",
       themeVariables: {
-        background: '#f5f5f0',
-        primaryColor: '#4a90e2',
-        primaryTextColor: '#1e3a5f',
-        primaryBorderColor: '#2e5f8f',
-        lineColor: '#5f7b8f',
-        secondaryColor: '#7db3e8',
-        tertiaryColor: '#5fb389',
+        background: "#f5f5f0",
+        primaryColor: "#4a90e2",
+        primaryTextColor: "#1e3a5f",
+        primaryBorderColor: "#2e5f8f",
+        lineColor: "#5f7b8f",
+        secondaryColor: "#7db3e8",
+        tertiaryColor: "#5fb389",
         fontFamily: '"Helvetica Neue", "Arial", "Noto Sans SC", sans-serif',
-        fontSize: '14px',
+        fontSize: "14px",
       },
       themeCSS: `
         /* Geometric Collage - 几何拼贴风格 */
@@ -8447,11 +8476,11 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           stroke: #2e5f8f !important;
           stroke-width: 2px !important;
         }
-      `
+      `,
     },
-    bgClass: 'bg-[#f5f5f0]',
+    bgClass: "bg-[#f5f5f0]",
     bgStyle: {
-      backgroundColor: '#f5f5f0',
+      backgroundColor: "#f5f5f0",
       backgroundImage: `
         repeating-linear-gradient(
           45deg,
@@ -8468,8 +8497,8 @@ export const themes: Record<ThemeType, ThemeConfig> = {
           rgba(95, 179, 137, 0.02) 20px
         )
       `,
-      backgroundSize: '40px 40px, 40px 40px',
-      position: 'relative' as const,
-    }
-  },  
+      backgroundSize: "40px 40px, 40px 40px",
+      position: "relative" as const,
+    },
+  },
 };

@@ -37,7 +37,7 @@ function SlideCard({
           <h3 className="mt-1 text-base font-semibold text-foreground truncate leading-tight">
             {item.title}
           </h3>
-          {item.narration && !(item.status === "ready" && item.payload?.kind === "callout") && (
+          {item.narration && (
             <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{item.narration}</p>
           )}
         </div>
@@ -91,9 +91,6 @@ export function CanvasPane() {
                 />
               )}
               {item.payload.kind === "table" && <TableView spec={item.payload.spec} />}
-              {item.payload.kind === "callout" && (
-                <p className="rounded-md bg-muted/60 p-3 text-sm">{item.payload.spec.body}</p>
-              )}
             </>
           )}
         </SlideCard>

@@ -22,9 +22,7 @@ export function MathView({ steps, inline }: Props) {
   const rendered = useMemo(() => steps.map(renderTeX), [steps]);
   return (
     <div className="space-y-3 text-foreground">
-      {inline && (
-        <p className="text-sm text-muted-foreground italic">{inline}</p>
-      )}
+      {inline && <p className="text-sm text-muted-foreground italic">{inline}</p>}
       {rendered.map((html, i) => (
         <div
           key={i}

@@ -7,10 +7,7 @@ export function TableView({ spec }: { spec: TableSpec }) {
         <thead className="bg-muted/40">
           <tr>
             {spec.columns.map((c) => (
-              <th
-                key={c}
-                className="px-3 py-2 text-left font-medium text-muted-foreground"
-              >
+              <th key={c} className="px-3 py-2 text-left font-medium text-muted-foreground">
                 {c}
               </th>
             ))}

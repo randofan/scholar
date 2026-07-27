@@ -97,85 +97,46 @@ function responsePreview(text: string) {
   return text.replace(/\s+/g, " ").trim().slice(0, 180) || "empty response body";
 }
 
-function shouldRetryTransientError(err: unknown) {
-  const message = err instanceof Error ? err.message : String(err);
-  return /non-JSON|upstream|timeout|temporar|network|fetch failed|\b5\d\d\b/i.test(message);
-}
-
-// Back-compat alias used in existing tests.
-export const shouldRetryResearchError = shouldRetryTransientError;
-
 /**
- * Safely parse a fetch Response as JSON. If the body isn't JSON (e.g. the
- * upstream gateway returned plain text like "upstream request timeout"),
- * throw a controlled error that names the endpoint, status, and a preview
- * of the body — never let `res.json()` blow up with a cryptic SyntaxError.
+ * POST JSON and parse the response, converting a non-JSON body (e.g. a gateway
+ * returning plain text like "upstream request timeout") into a controlled
+ * error that names the endpoint, status, and a preview — never a cryptic
+ * SyntaxError from res.json().
+ *
+ * No retry: both remaining callers are fire-and-forget background tasks whose
+ * failure is already surfaced in the UI, and a retry would just delay that.
  */
-export async function parseJsonResponse<T>(res: Response, label = "service"): Promise<T> {
+export async function postJson<TResp>(
+  url: string,
+  body: unknown,
+  label: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TResp> {
+  const res = await fetchImpl(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   const text = await res.text();
+  let json: TResp & { ok?: boolean; error?: string };
   try {
-    return JSON.parse(text) as T;
+    json = JSON.parse(text);
   } catch {
     throw new Error(
       `${label} returned a non-JSON response (${res.status} ${res.statusText || "unknown status"}): ${responsePreview(text)}`,
     );
   }
-}
-
-export async function parseResearchResponse(res: Response): Promise<ResearchApiResponse> {
-  return parseJsonResponse<ResearchApiResponse>(res, "Research service");
-}
-
-/**
- * POST JSON to an endpoint with retry on transient/non-JSON failures. All
- * tool client fetches (illustrate, research) MUST go through this so no
- * caller ever calls `res.json()` directly on a possibly-non-JSON response.
- */
-export async function postJsonWithRetry<TResp>(
-  url: string,
-  body: unknown,
-  label: string,
-  fetchImpl: typeof fetch = fetch,
-  opts: { attempts?: number; retryDelayMs?: number } = {},
-): Promise<TResp> {
-  const attempts = opts.attempts ?? 3;
-  const retryDelayMs = opts.retryDelayMs ?? 500;
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      const res = await fetchImpl(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const json = await parseJsonResponse<TResp & { ok?: boolean; error?: string }>(res, label);
-      if (!res.ok || json.ok === false) {
-        throw new Error(json.error ?? `${label} request failed (${res.status})`);
-      }
-      return json;
-    } catch (err) {
-      lastError = err;
-      if (attempt >= attempts || !shouldRetryTransientError(err)) break;
-      if (retryDelayMs > 0) await new Promise((r) => setTimeout(r, retryDelayMs * attempt));
-    }
+  if (!res.ok || json.ok === false) {
+    throw new Error(json.error ?? `${label} request failed (${res.status})`);
   }
-
-  throw lastError instanceof Error ? lastError : new Error(`${label} failed`);
+  return json;
 }
 
 export async function fetchResearchBriefing(
   payload: ResearchRequestPayload,
   fetchImpl: typeof fetch = fetch,
-  opts: { attempts?: number; retryDelayMs?: number } = {},
 ) {
-  return postJsonWithRetry<ResearchApiResponse>(
-    "/api/research",
-    payload,
-    "Research service",
-    fetchImpl,
-    { attempts: 1, ...opts },
-  );
+  return postJson<ResearchApiResponse>("/api/research", payload, "Research service", fetchImpl);
 }
 
 /**
@@ -378,9 +339,7 @@ function visualToCanvasPayload(v: Visual): CanvasSpec {
       ? ({ kind: "math", spec: v.math } as CanvasSpec)
       : v.kind === "diagram"
         ? ({ kind: "diagram", spec: v.diagram } as CanvasSpec)
-        : v.kind === "table"
-          ? ({ kind: "table", spec: v.table } as CanvasSpec)
-          : ({ kind: "callout", spec: v.callout } as CanvasSpec);
+        : ({ kind: "table", spec: v.table } as CanvasSpec);
 }
 
 /**
@@ -472,9 +431,7 @@ export async function distillSessionLessons(fetchImpl: typeof fetch = fetch) {
   for (const l of lessons) (lessonsByKind[l.kind] ??= []).push(l.text);
 
   try {
-    await postJsonWithRetry("/api/skills", { lessonsByKind }, "Skills service", fetchImpl, {
-      attempts: 1,
-    });
+    await postJson("/api/skills", { lessonsByKind }, "Skills service", fetchImpl);
     store().markLessonsDistilled(lessons.length);
     // The skill files just changed — drop the cache so a subsequent session in
     // this same tab picks up the freshly distilled rules instead of the ones
@@ -655,7 +612,6 @@ export function buildClientTools(host: ToolHost) {
               citationCandidates: citationCandidates.length > 0 ? citationCandidates : undefined,
             },
             fetch,
-            { attempts: 1 },
           );
           store().patchResearch(id, {
             status: "ready",

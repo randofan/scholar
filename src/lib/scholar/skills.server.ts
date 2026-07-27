@@ -182,26 +182,3 @@ export async function distillLessonsIntoSkill(
   await bucket.put(skillKeyForKind(kind), JSON.stringify(file, null, 2));
   return updated;
 }
-
-// Per-isolate, per-kind cache so a burst of slides doesn't hit R2 every time.
-const skillCache = new Map<StrictKind, { rules: string[]; fetchedAt: number }>();
-const SKILL_CACHE_TTL_MS = 60_000;
-
-export async function loadSkillRulesCached(
-  bucket: R2BucketLike | undefined,
-  kind: StrictKind,
-): Promise<string[]> {
-  if (!bucket) return [];
-  const now = Date.now();
-  const hit = skillCache.get(kind);
-  if (hit && now - hit.fetchedAt < SKILL_CACHE_TTL_MS) return hit.rules;
-  const rules = await loadSkillRules(bucket, kind);
-  skillCache.set(kind, { rules, fetchedAt: now });
-  return rules;
-}
-
-/** Drop the cache for one kind, or all kinds. Called after a distill run, and from tests. */
-export function invalidateSkillCache(kind?: StrictKind) {
-  if (kind) skillCache.delete(kind);
-  else skillCache.clear();
-}

@@ -15,8 +15,6 @@ import {
 } from "@/components/ui/sheet";
 import { ArrowLeft, FlaskConical } from "lucide-react";
 
-
-
 export const Route = createFileRoute("/session")({
   component: SessionPage,
   ssr: false,
@@ -41,7 +39,12 @@ function SessionPage() {
     return () => clearTimeout(t);
   }, [navigate]);
 
-  if (!pdf) return <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">Loading session…</div>;
+  if (!pdf)
+    return (
+      <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
+        Loading session…
+      </div>
+    );
 
   return (
     <div className="flex h-screen flex-col">
@@ -101,8 +104,8 @@ function SessionPage() {
           <SheetHeader className="border-b border-border p-4">
             <SheetTitle>Background research</SheetTitle>
             <SheetDescription className="text-xs">
-              Debug view of what the research agent is fetching behind the scenes. These
-              briefings are fed to the voice agent as factual grounding (not spoken verbatim).
+              Debug view of what the research agent is fetching behind the scenes. These briefings
+              are fed to the voice agent as factual grounding (not spoken verbatim).
             </SheetDescription>
           </SheetHeader>
           <ResearchFeed />

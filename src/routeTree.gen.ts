@@ -9,21 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as DevHarnessRouteImport } from './routes/dev-harness'
-import { Route as DevMermaidHarnessRouteImport } from './routes/dev-mermaid-harness'
 import { Route as SessionRouteImport } from './routes/session'
-import { Route as ApiResearchRouteImport } from './routes/api/research'
+import { Route as DevMermaidHarnessRouteImport } from './routes/dev-mermaid-harness'
+import { Route as DevHarnessRouteImport } from './routes/dev-harness'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiSkillsRouteImport } from './routes/api/skills'
+import { Route as ApiResearchRouteImport } from './routes/api/research'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DevHarnessRoute = DevHarnessRouteImport.update({
-  id: '/dev-harness',
-  path: '/dev-harness',
+const SessionRoute = SessionRouteImport.update({
+  id: '/session',
+  path: '/session',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DevMermaidHarnessRoute = DevMermaidHarnessRouteImport.update({
@@ -31,19 +26,24 @@ const DevMermaidHarnessRoute = DevMermaidHarnessRouteImport.update({
   path: '/dev-mermaid-harness',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SessionRoute = SessionRouteImport.update({
-  id: '/session',
-  path: '/session',
+const DevHarnessRoute = DevHarnessRouteImport.update({
+  id: '/dev-harness',
+  path: '/dev-harness',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiResearchRoute = ApiResearchRouteImport.update({
-  id: '/api/research',
-  path: '/api/research',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSkillsRoute = ApiSkillsRouteImport.update({
   id: '/api/skills',
   path: '/api/skills',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiResearchRoute = ApiResearchRouteImport.update({
+  id: '/api/research',
+  path: '/api/research',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -110,18 +110,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dev-harness': {
-      id: '/dev-harness'
-      path: '/dev-harness'
-      fullPath: '/dev-harness'
-      preLoaderRoute: typeof DevHarnessRouteImport
+    '/session': {
+      id: '/session'
+      path: '/session'
+      fullPath: '/session'
+      preLoaderRoute: typeof SessionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dev-mermaid-harness': {
@@ -131,18 +124,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevMermaidHarnessRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/session': {
-      id: '/session'
-      path: '/session'
-      fullPath: '/session'
-      preLoaderRoute: typeof SessionRouteImport
+    '/dev-harness': {
+      id: '/dev-harness'
+      path: '/dev-harness'
+      fullPath: '/dev-harness'
+      preLoaderRoute: typeof DevHarnessRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/research': {
-      id: '/api/research'
-      path: '/api/research'
-      fullPath: '/api/research'
-      preLoaderRoute: typeof ApiResearchRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/skills': {
@@ -150,6 +143,13 @@ declare module '@tanstack/react-router' {
       path: '/api/skills'
       fullPath: '/api/skills'
       preLoaderRoute: typeof ApiSkillsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/research': {
+      id: '/api/research'
+      path: '/api/research'
+      fullPath: '/api/research'
+      preLoaderRoute: typeof ApiResearchRouteImport
       parentRoute: typeof rootRouteImport
     }
   }

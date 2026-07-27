@@ -37,17 +37,6 @@ async function fetchElevenLabsJson<T>(
   return (await res.json()) as T;
 }
 
-export async function fetchElevenLabsConversationToken(agentId: string) {
-  const json = await fetchElevenLabsJson<{ token?: string }>(
-    `/v1/convai/conversation/token?agent_id=${encodeURIComponent(agentId)}`,
-    "token",
-  );
-  if (!json.token) {
-    throw new Error("ElevenLabs returned no conversation token");
-  }
-  return json.token;
-}
-
 export async function fetchElevenLabsConversationSignedUrl(agentId: string) {
   const json = await fetchElevenLabsJson<{ signed_url?: string }>(
     `/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`,

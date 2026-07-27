@@ -1,44 +1,19 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type CanvasItemKind = "chart" | "math" | "diagram" | "table" | "callout";
+import type { ChartSpec, DiagramSpec, MathSpec, StrictKind, TableSpec } from "./illustrate-shared";
 
-export interface ChartSpec {
-  chartType: "line" | "bar" | "area" | "scatter";
-  xKey: string;
-  yKeys: string[];
-  data: Record<string, number | string>[];
-  xLabel?: string;
-  yLabel?: string;
-}
-
-export interface MathSpec {
-  // KaTeX strings, one per line of derivation
-  steps: string[];
-  inline?: string;
-}
-
-export interface DiagramSpec {
-  // mermaid source
-  mermaid: string;
-}
-
-export interface TableSpec {
-  columns: string[];
-  rows: (string | number)[][];
-}
-
-export interface CalloutSpec {
-  body: string;
-  tone?: "info" | "warn" | "key";
-}
+// Visual shapes live in illustrate-shared.ts (the single source of truth for
+// what a generated visual looks like); re-exported here because the UI layer
+// imports them from the store.
+export type { ChartSpec, DiagramSpec, MathSpec, TableSpec };
+export type CanvasItemKind = StrictKind;
 
 export type CanvasSpec =
   | { kind: "chart"; spec: ChartSpec }
   | { kind: "math"; spec: MathSpec }
   | { kind: "diagram"; spec: DiagramSpec }
-  | { kind: "table"; spec: TableSpec }
-  | { kind: "callout"; spec: CalloutSpec };
+  | { kind: "table"; spec: TableSpec };
 
 export interface CanvasItem {
   id: string;
@@ -58,18 +33,11 @@ export interface CanvasItem {
   renderRetries?: number;
 }
 
-export interface ResearchCitation {
-  title: string;
-  url: string;
-  snippet?: string;
-}
-
 export interface ResearchItem {
   id: string;
   query: string;
   status: "pending" | "ready" | "error";
   summary?: string;
-  citations?: ResearchCitation[];
   createdAt: number;
   error?: string;
 }
