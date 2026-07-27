@@ -61,6 +61,7 @@ beforeEach(() => {
     transcript: [],
     lessons: [],
     distilledLessonCount: 0,
+    generationStats: {},
   });
 });
 
@@ -259,6 +260,80 @@ describe("self-correcting loop — feedback quality", () => {
     // No parseMermaid — e.g. Node, where mermaid cannot load.
     const { visual } = await generateVisualWithRetries("diagram", { topic: "T" });
     expect(visual.diagram?.mermaid).toContain("flowchart LR");
+  });
+});
+
+describe("cross-session learning loop", () => {
+  it("folds distilled R2 rules into the system prompt, ahead of raw session lessons", async () => {
+    // The regression this pins: when generation moved on-device the only
+    // reader of the persistent skill file was deleted, so rules were written
+    // at hangup and never read back. The system re-learned the same lessons
+    // every session instead of starting each one smarter.
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ ok: true, rulesByKind: { diagram: ["ALWAYS balance bracket pairs"] } }),
+      );
+    vi.stubGlobal("fetch", fetchImpl);
+    useScholarStore.setState({
+      lessons: [{ kind: "diagram" as const, text: "raw lesson from this session" }],
+    });
+
+    let systemPrompt = "";
+    __setLanguageModel({
+      availability: async () => "available",
+      create: async (o) => {
+        systemPrompt = o.initialPrompts?.[0]?.content ?? "";
+        return { prompt: async () => DIAGRAM_JSON };
+      },
+    });
+
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "T", kind: "diagram" });
+    await waitForMicrotasks();
+
+    expect(systemPrompt).toContain("ALWAYS balance bracket pairs");
+    expect(systemPrompt).toContain("raw lesson from this session");
+    // Distilled first — it has survived a generalization pass.
+    expect(systemPrompt.indexOf("ALWAYS balance bracket pairs")).toBeLessThan(
+      systemPrompt.indexOf("raw lesson from this session"),
+    );
+  });
+
+  it("records attempts-to-success so 'better zero-shot' is measurable, not assumed", async () => {
+    const broken = JSON.stringify({ title: "T", narration: "n", mermaid: "junk" });
+    __setLanguageModel(fakeModel([broken, broken, DIAGRAM_JSON]));
+
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "T", kind: "diagram" });
+    await waitForMicrotasks();
+
+    const stat = useScholarStore.getState().generationStats.diagram;
+    expect(stat).toEqual({ generations: 1, firstTry: 0, totalAttempts: 3, failures: 0 });
+  });
+
+  it("counts a first-try success distinctly from a recovered one", async () => {
+    __setLanguageModel(fakeModel([DIAGRAM_JSON]));
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "T", kind: "diagram" });
+    await waitForMicrotasks();
+
+    const stat = useScholarStore.getState().generationStats.diagram;
+    expect(stat?.firstTry).toBe(1);
+    expect(stat?.totalAttempts).toBe(1);
+  });
+
+  it("counts exhausted budgets as failures, so the stat cannot look rosy while slides break", async () => {
+    __setLanguageModel(
+      fakeModel([JSON.stringify({ title: "T", narration: "n", mermaid: "junk" })]),
+    );
+    const tools = buildClientTools({ sendContextualUpdate: vi.fn() });
+    tools.visualize({ topic: "T", kind: "diagram" });
+    await waitForMicrotasks();
+
+    const stat = useScholarStore.getState().generationStats.diagram;
+    expect(stat?.failures).toBe(1);
+    expect(stat?.firstTry).toBe(0);
   });
 });
 

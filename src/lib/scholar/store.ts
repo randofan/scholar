@@ -87,6 +87,25 @@ export interface Lesson {
   text: string;
 }
 
+/**
+ * Per-kind generation telemetry. The whole point of the skill files is that
+ * the model should need FEWER attempts over time — "improved zero-shot". That
+ * is a measurable claim, and without recording it there is no way to tell
+ * whether the learned rules are helping, doing nothing, or actively crowding
+ * the prompt and hurting.
+ *
+ * firstTry / generations is the number to watch.
+ */
+export interface GenerationStat {
+  generations: number;
+  /** Accepted on attempt 1 — no validator rejection at all. */
+  firstTry: number;
+  /** Total attempts across all generations, including the accepted one. */
+  totalAttempts: number;
+  /** Generations that exhausted the retry budget and produced nothing. */
+  failures: number;
+}
+
 interface PdfState {
   name: string;
   text: string;
@@ -119,6 +138,9 @@ interface ScholarState {
    */
   lessons: Lesson[];
   addLesson: (kind: CanvasItemKind, lesson: string) => void;
+  /** Per-kind attempts-to-success telemetry — see GenerationStat. */
+  generationStats: Partial<Record<CanvasItemKind, GenerationStat>>;
+  recordGeneration: (kind: CanvasItemKind, attempts: number, succeeded: boolean) => void;
   /** How many of `lessons` have already been distilled into the persistent skill files. */
   distilledLessonCount: number;
   markLessonsDistilled: (count: number) => void;
@@ -194,6 +216,28 @@ export const useScholarStore = create<ScholarState>()(
           if (s.lessons.some((l) => l.kind === kind && l.text === text)) return {};
           return { lessons: [...s.lessons, { kind, text }].slice(-MAX_LESSONS) };
         }),
+      generationStats: {},
+      recordGeneration: (kind, attempts, succeeded) =>
+        set((st) => {
+          const prev = st.generationStats[kind] ?? {
+            generations: 0,
+            firstTry: 0,
+            totalAttempts: 0,
+            failures: 0,
+          };
+          return {
+            generationStats: {
+              ...st.generationStats,
+              [kind]: {
+                generations: prev.generations + 1,
+                firstTry: prev.firstTry + (succeeded && attempts === 1 ? 1 : 0),
+                totalAttempts: prev.totalAttempts + attempts,
+                failures: prev.failures + (succeeded ? 0 : 1),
+              },
+            },
+          };
+        }),
+
       distilledLessonCount: 0,
       markLessonsDistilled: (count) => set({ distilledLessonCount: count }),
 
@@ -205,6 +249,7 @@ export const useScholarStore = create<ScholarState>()(
           transcript: [],
           lessons: [],
           distilledLessonCount: 0,
+          generationStats: {},
         }),
     }),
     {
@@ -216,6 +261,7 @@ export const useScholarStore = create<ScholarState>()(
         pdf: s.pdf,
         lessons: s.lessons,
         distilledLessonCount: s.distilledLessonCount,
+        generationStats: s.generationStats,
       }),
     },
   ),

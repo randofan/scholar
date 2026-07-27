@@ -343,8 +343,59 @@ object. **We never see the LLM.**
 `onDisconnect` → `distillSessionLessons()` groups the session's lessons by
 kind and POSTs them to `/api/skills`, where Workers AI merges each group into
 that kind's R2 skill file (with a deterministic dedupe-and-cap fallback if the
-AI binding is missing). Those rules are loaded into the system prompt of every
-future session — the cross-session learning loop.
+AI binding is missing), then invalidates the client-side rules cache.
+
+---
+
+## 6b. The learning loop, in full
+
+Two loops at different timescales, both feeding the same system prompt.
+
+```
+WITHIN a generation (seconds)
+  validator rejects -> reason + failing output -> next attempt
+                                                  (max 5, session-local)
+
+WITHIN a session (minutes)
+  each rejection -> store.addLesson(kind, reason)
+                 -> replayed into LATER slides of the same kind
+
+ACROSS sessions (persistent)
+  hangup -> POST /api/skills { lessonsByKind }
+         -> Workers AI generalizes per kind
+         -> R2: skills/visualize-<kind>.json
+         -> GET /api/skills on next page load  (skill-rules.ts, cached)
+         -> mergeSkillRules(distilled, session)
+         -> buildSystemPrompt(kind, rules)
+```
+
+`mergeSkillRules` puts **distilled rules first**: they have survived a
+generalization pass and read as reusable instructions. Session lessons follow
+as raw-but-recent context. Both are capped (8 + 6) because this text lands in
+the system prompt of a model with a few thousand tokens of input quota, and
+the diagram prompt already spends ~1,600 on the mermaid guide.
+
+### Measuring whether it works
+
+The premise — "learned rules improve zero-shot" — is a falsifiable claim, and
+crowding a small model's prompt with mediocre rules could just as easily hurt.
+`store.generationStats` records per kind:
+
+| Field | Meaning |
+|---|---|
+| `generations` | visualize calls |
+| `firstTry` | accepted on attempt 1, no rejection |
+| `totalAttempts` | including the accepted one |
+| `failures` | exhausted the retry budget |
+
+`firstTry / generations` is the number to watch. Inspect it live:
+
+```js
+__scholarStore.getState().generationStats
+```
+
+Failures are counted too — a stat that only saw successes would report a rosy
+first-try rate while slides were visibly breaking.
 
 ---
 

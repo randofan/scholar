@@ -2,10 +2,17 @@ import { rankReferencesByQuery, extractReferences } from "./references";
 import { runContentValidations, type StrictKind, type Visual } from "./illustrate-shared";
 import type { MermaidParseOutcome } from "@/lib/mermaid/validate";
 import {
+  invalidatePersistedSkillRules,
+  loadPersistedSkillRules,
+  mergeSkillRules,
+  prefetchPersistedSkillRules,
+} from "./skill-rules";
+import {
   generateTeaserOnDevice,
   generateVisualOnDevice,
   isOnDeviceReady,
   onDeviceAvailability,
+  resetOnDeviceSessions,
 } from "./on-device";
 import type { CanvasItem, CanvasItemKind, CanvasSpec, Lesson } from "./store";
 import { useScholarStore } from "./store";
@@ -281,7 +288,7 @@ export async function generateVisualWithRetries(
     maxAttempts?: number;
     parseMermaid?: MermaidParseCheck;
   } = {},
-): Promise<{ visual: Visual; warnings: string[] }> {
+): Promise<{ visual: Visual; warnings: string[]; attempts: number }> {
   const maxAttempts = opts.maxAttempts ?? MAX_ATTEMPTS;
   const warnings: string[] = [];
   let correction = input.correction;
@@ -313,7 +320,7 @@ export async function generateVisualWithRetries(
         }
       }
 
-      return { visual, warnings };
+      return { visual, warnings, attempts: attempt };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       warnings.push(msg);
@@ -387,12 +394,18 @@ function harvestLessons(kind: StrictKind, warnings: string[] | undefined) {
   for (const w of warnings) addLesson(kind, w);
 }
 
-/** Session lessons for one kind, replayed into that kind's system prompt. */
-function skillRulesForKind(kind: StrictKind): string[] {
-  return useScholarStore
+/**
+ * Rules for one kind's system prompt: the distilled, cross-session ones from
+ * R2 first, then this session's raw validator lessons. See
+ * skill-rules.ts for why the ordering matters.
+ */
+async function skillRulesForKind(kind: StrictKind): Promise<string[]> {
+  const sessionLessons = useScholarStore
     .getState()
     .lessons.filter((l) => l.kind === kind)
     .map((l) => l.text);
+  const persisted = await loadPersistedSkillRules();
+  return mergeSkillRules(persisted[kind], sessionLessons);
 }
 
 function collectRecentVisuals(excludeId: string) {
@@ -424,6 +437,7 @@ export function guessSpeculativeVisualTopic(pdfName: string): { topic: string; h
  * invisible until a real `visualize` call benefits from the warm session.
  */
 export function dispatchSpeculativeVisual(pdfName: string) {
+  prefetchPersistedSkillRules();
   void (async () => {
     try {
       const availability = await onDeviceAvailability();
@@ -462,6 +476,11 @@ export async function distillSessionLessons(fetchImpl: typeof fetch = fetch) {
       attempts: 1,
     });
     store().markLessonsDistilled(lessons.length);
+    // The skill files just changed — drop the cache so a subsequent session in
+    // this same tab picks up the freshly distilled rules instead of the ones
+    // fetched at page load.
+    invalidatePersistedSkillRules();
+    resetOnDeviceSessions();
   } catch (err) {
     // Non-fatal: lessons stay in the session store and the next session end
     // (or reload within the tab session) retries the distill.
@@ -506,7 +525,7 @@ export function regenerateAfterRenderFailure(itemId: string, renderError: string
 
   void (async () => {
     try {
-      const { visual, warnings } = await generateVisualWithRetries(
+      const { visual, warnings, attempts } = await generateVisualWithRetries(
         "diagram",
         {
           topic: item.request?.topic ?? item.title,
@@ -517,9 +536,13 @@ export function regenerateAfterRenderFailure(itemId: string, renderError: string
           // failures our structural validator provably cannot.
           correction: `mermaid.render() rejected this source with "${renderError}". Failing source:\n${failedSource.slice(0, 600)}`,
         },
-        { skillRules: skillRulesForKind("diagram"), parseMermaid: browserMermaidParse },
+        {
+          skillRules: await skillRulesForKind("diagram"),
+          parseMermaid: browserMermaidParse,
+        },
       );
       harvestLessons("diagram", warnings);
+      store().recordGeneration("diagram", attempts, true);
       store().patchCanvas(itemId, {
         status: "ready",
         title: visual.title || item.title,
@@ -566,7 +589,7 @@ export function buildClientTools(host: ToolHost) {
             );
           }
 
-          const { visual, warnings } = await generateVisualWithRetries(
+          const { visual, warnings, attempts } = await generateVisualWithRetries(
             kind,
             {
               topic: params.topic,
@@ -574,9 +597,10 @@ export function buildClientTools(host: ToolHost) {
               facts: params.facts,
               recentVisuals: collectRecentVisuals(id),
             },
-            { skillRules: skillRulesForKind(kind), parseMermaid: browserMermaidParse },
+            { skillRules: await skillRulesForKind(kind), parseMermaid: browserMermaidParse },
           );
           harvestLessons(kind, warnings);
+          store().recordGeneration(kind, attempts, true);
 
           store().patchCanvas(id, {
             status: "ready",
@@ -590,6 +614,9 @@ export function buildClientTools(host: ToolHost) {
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : "failed";
+          // Count the exhausted budget too — a stat that only sees successes
+          // would report a rosy first-try rate while slides were failing.
+          store().recordGeneration(kind, MAX_ATTEMPTS, false);
           store().patchCanvas(id, { status: "error", error: msg });
           deliverContextualUpdate(host, `[VISUAL FAILED for "${params.topic}": ${msg}]`);
         }
